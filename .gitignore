@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Build / cache
+coverage/
+*.tsbuildinfo

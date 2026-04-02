@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=Lexend:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0');
+
+:root {
+  font-family: 'Manrope', sans-serif;
+  color-scheme: dark;
+  --primary-container: #00fc40;
+  --on-surface-variant: #abaaae;
+  --secondary-fixed: #4be4ff;
+  --on-tertiary-fixed: #453900;
+  --on-background: #f2f0f4;
+  --error-dim: #d53d18;
+  --tertiary: #ffe792;
+  --on-secondary: #004d59;
+  --outline-variant: #47484b;
+  --primary: #9cff93;
+  --tertiary-dim: #efc900;
+  --inverse-on-surface: #545558;
+  --tertiary-fixed-dim: #efc900;
+  --error-container: #b92902;
+  --error: #ff7351;
+  --surface-bright: #2a2c31;
+  --on-primary-container: #005a10;
+  --surface-container-lowest: #000000;
+  --on-secondary-fixed: #003a43;
+  --primary-fixed-dim: #00ec3b;
+  --surface-variant: #24262a;
+  --on-tertiary: #655400;
+  --on-primary: #006413;
+  --inverse-surface: #faf9fd;
+  --on-error: #450900;
+  --primary-fixed: #00fc40;
+  --on-tertiary-container: #5b4b00;
+  --tertiary-container: #ffd709;
+  --secondary-fixed-dim: #05d7f3;
+  --secondary-dim: #00d4f0;
+  --on-primary-fixed-variant: #006513;
+  --surface: #0d0e11;
+  --on-error-container: #ffd2c8;
+  --outline: #757579;
+  --on-secondary-fixed-variant: #005966;
+  --tertiary-fixed: #ffd709;
+  --primary-dim: #00ec3b;
+  --surface-container: #181a1d;
+  --on-surface: #f2f0f4;
+  --on-tertiary-fixed-variant: #665500;
+  --surface-container-highest: #24262a;
+  --secondary-container: #006877;
+  --on-secondary-container: #eafbff;
+  --background: #0d0e11;
+  --surface-container-low: #121316;
+  --secondary: #2de2ff;
+  --on-primary-fixed: #00440a;
+  --inverse-primary: #006f16;
+  --surface-dim: #0d0e11;
+  --surface-container-high: #1e2023;
+  --surface-tint: #9cff93;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--on-background);
+  background-color: var(--background);
+  overflow-x: hidden;
+  font-family: 'Manrope', sans-serif;
+}
+
+body::selection {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+a,
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+input {
+  outline: none;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  line-height: 1;
+}
+
+.arcade-shadow {
+  box-shadow: 4px 4px 0 0 rgba(0, 0, 0, 1);
+}
+
+.arcade-shadow-primary {
+  box-shadow: 4px 4px 0 0 #006413;
+}
+
+.arcade-shadow-secondary {
+  box-shadow: 4px 4px 0 0 #004d59;
+}
+
+.font-headline {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.font-body {
+  font-family: 'Manrope', sans-serif;
+}
+
+.font-label {
+  font-family: 'Lexend', sans-serif;
+}
