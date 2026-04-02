@@ -43,6 +43,7 @@ def _serialize_run(row) -> Optional[TrainingRunResponse]:
         return None
 
     raw_logs = json.loads(row["logs_json"]) if row["logs_json"] else []
+    raw_augmentations = json.loads(row["augmentation_modes_json"]) if row["augmentation_modes_json"] else []
     return TrainingRunResponse(
         user_id=row["user_id"],
         team_id=row["team_id"],
@@ -51,6 +52,8 @@ def _serialize_run(row) -> Optional[TrainingRunResponse]:
         epochs=row["epochs"],
         learning_rate=row["learning_rate"],
         trained_sample_count=row["trained_sample_count"],
+        augmentation_modes=raw_augmentations,
+        augment_copies=row["augment_copies"] or 1,
         backend=row["backend"],
         final_loss=row["final_loss"],
         final_accuracy=row["final_accuracy"],
@@ -123,6 +126,11 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
     if not payload.logs:
         raise ValidationError("Training logs cannot be empty.")
 
+    supported_augmentations = {"rotation", "shift", "scale", "affine"}
+    invalid_augmentations = [mode for mode in payload.augmentation_modes if mode not in supported_augmentations]
+    if invalid_augmentations:
+        raise ValidationError(f"Unsupported augmentation mode(s): {', '.join(invalid_augmentations)}.")
+
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as connection:
         count_row = connection.execute(
@@ -154,6 +162,7 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
                 for point in payload.logs
             ]
         )
+        augmentation_modes_json = json.dumps(payload.augmentation_modes)
 
         connection.execute(
             """
@@ -165,6 +174,8 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
                 epochs,
                 learning_rate,
                 trained_sample_count,
+                augmentation_modes_json,
+                augment_copies,
                 final_loss,
                 final_accuracy,
                 final_val_loss,
@@ -174,7 +185,7 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 team_id = excluded.team_id,
                 competition_id = excluded.competition_id,
@@ -182,6 +193,8 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
                 epochs = excluded.epochs,
                 learning_rate = excluded.learning_rate,
                 trained_sample_count = excluded.trained_sample_count,
+                augmentation_modes_json = excluded.augmentation_modes_json,
+                augment_copies = excluded.augment_copies,
                 final_loss = excluded.final_loss,
                 final_accuracy = excluded.final_accuracy,
                 final_val_loss = excluded.final_val_loss,
@@ -198,6 +211,8 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
                 payload.epochs,
                 payload.learning_rate,
                 payload.trained_sample_count,
+                augmentation_modes_json,
+                payload.augment_copies,
                 payload.final_loss,
                 payload.final_accuracy,
                 payload.final_val_loss,

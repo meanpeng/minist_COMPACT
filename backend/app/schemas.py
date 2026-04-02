@@ -14,7 +14,6 @@ class TeamCreateRequest(BaseModel):
 class TeamJoinRequest(BaseModel):
     competition_id: str = Field(min_length=1)
     username: str = Field(min_length=1, max_length=32)
-    team_name: str = Field(min_length=1, max_length=64)
     invite_code: str = Field(min_length=1, max_length=64)
 
 
@@ -188,6 +187,8 @@ class TrainingRunPayload(BaseModel):
     epochs: int = Field(ge=1, le=200)
     learning_rate: float = Field(gt=0, le=1)
     trained_sample_count: int = Field(ge=1)
+    augmentation_modes: List[str] = Field(default_factory=list)
+    augment_copies: int = Field(default=1, ge=1, le=8)
     backend: str = Field(min_length=1, max_length=32)
     final_loss: Optional[float] = Field(default=None, ge=0)
     final_accuracy: Optional[float] = Field(default=None, ge=0, le=1)
@@ -204,6 +205,8 @@ class TrainingRunResponse(BaseModel):
     epochs: int
     learning_rate: float
     trained_sample_count: int
+    augmentation_modes: List[str] = Field(default_factory=list)
+    augment_copies: int = 1
     backend: str
     final_loss: Optional[float] = None
     final_accuracy: Optional[float] = None
@@ -238,14 +241,16 @@ class SubmissionScorePayload(BaseModel):
 
 
 class SubmissionBootstrapResponse(BaseModel):
-    submission_id: str
+    submission_id: Optional[str] = None
     user_id: str
     team_id: str
-    sample_count: int = Field(ge=1)
+    sample_count: int = Field(ge=0)
     competition: CompetitionStatusPayload
     team_submission_limit: int = Field(ge=1)
     remaining_team_attempts: int = Field(ge=0)
-    challenge_images: List[SubmissionChallengeImagePayload]
+    submission_available: bool = True
+    submission_block_reason: Optional[str] = None
+    challenge_images: List[SubmissionChallengeImagePayload] = Field(default_factory=list)
     modeling_config: ModelingConfigResponse
     latest_run: Optional[TrainingRunResponse] = None
     latest_result: Optional[SubmissionScorePayload] = None

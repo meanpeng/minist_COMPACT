@@ -20,6 +20,23 @@ function formatTimestamp(value) {
   return new Date(value).toLocaleString();
 }
 
+function formatDuration(totalSeconds) {
+  if (typeof totalSeconds !== 'number' || Number.isNaN(totalSeconds) || totalSeconds < 0) {
+    return '--';
+  }
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}D ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function getLeaderboardVisual(row) {
   if (row.is_current_team) {
     return { accent: 'primary', icon: 'radar' };
@@ -70,19 +87,18 @@ function DashboardPage({
   session,
   onResetExperiment,
   trainingUnlocked = false,
+  isTrainingActive = false,
   inviteCodeNotice = null,
   onDismissInviteCodeNotice,
 }) {
   const [dashboard, setDashboard] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(REFRESH_INTERVAL_MS / 1000);
   const [copyStatus, setCopyStatus] = useState('');
 
   useEffect(() => {
     let isActive = true;
     let intervalId = null;
-    let countdownId = null;
 
     async function loadDashboard({ silent } = { silent: false }) {
       if (!session?.session_token) {
@@ -105,7 +121,6 @@ function DashboardPage({
 
         setDashboard(response);
         setErrorMessage('');
-        setSecondsUntilRefresh(REFRESH_INTERVAL_MS / 1000);
       } catch (error) {
         if (!isActive) {
           return;
@@ -125,14 +140,9 @@ function DashboardPage({
       loadDashboard({ silent: true });
     }, REFRESH_INTERVAL_MS);
 
-    countdownId = window.setInterval(() => {
-      setSecondsUntilRefresh((current) => (current <= 1 ? REFRESH_INTERVAL_MS / 1000 : current - 1));
-    }, 1000);
-
     return () => {
       isActive = false;
       window.clearInterval(intervalId);
-      window.clearInterval(countdownId);
     };
   }, [session?.session_token]);
 
@@ -155,6 +165,32 @@ function DashboardPage({
   const leaderboard = dashboard?.leaderboard || [];
   const teamMembers = dashboard?.team_members || [];
   const inviteCode = dashboard?.session?.team?.invite_code || session?.team?.invite_code || '';
+  const competitionName = competition?.competition_name || dashboard?.session?.competition?.name || 'COMPETITION_SYNCING';
+  const competitionTimer = (() => {
+    if (!competition) {
+      return { label: 'STATUS', value: '--' };
+    }
+
+    if (competition.effective_status === 'not_started') {
+      return {
+        label: 'STARTS IN',
+        value: competition.seconds_until_start != null ? formatDuration(competition.seconds_until_start) : 'NOT_STARTED',
+      };
+    }
+
+    if (competition.effective_status === 'ended') {
+      return { label: 'STATUS', value: 'ENDED' };
+    }
+
+    if (!competition.end_time) {
+      return { label: 'STATUS', value: 'IN_PROGRESS' };
+    }
+
+    return {
+      label: 'TIME LEFT',
+      value: competition.seconds_until_end != null ? formatDuration(competition.seconds_until_end) : 'IN_PROGRESS',
+    };
+  })();
   const distributionBars = annotationStats?.counts_by_label?.length
     ? (() => {
         const maxCount = Math.max(...annotationStats.counts_by_label, 0);
@@ -185,17 +221,21 @@ function DashboardPage({
     <AppChrome
       activeSection="dashboard"
       session={session}
+      competition={competition}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
+      isTrainingActive={isTrainingActive}
     >
       <main className="dashboard-main custom-scrollbar">
         <header className="hero-panel">
           <div className="hero-glow" aria-hidden="true" />
 
           <div className="hero-copy">
-            <h1>MNIST_CHALLENGE_2024</h1>
+            <h1>{competitionName}</h1>
             <div className="hero-meta">
               <span className="hero-phase">{competition ? `PHASE_${competition.effective_status.toUpperCase()}` : 'PHASE_SYNCING'}</span>
+              <span className="hero-separator">//</span>
+              <span>{`${competitionTimer.label}_${competitionTimer.value}`}</span>
               <span className="hero-separator">//</span>
               <span>{`TEAM_MEMBERS_${String(teamMembers.length).padStart(2, '0')}`}</span>
             </div>
@@ -203,8 +243,8 @@ function DashboardPage({
           </div>
 
           <div className="hero-timer-block">
-            <p>Live Refresh</p>
-            <div className="hero-timer">{`00:00:${String(secondsUntilRefresh).padStart(2, '0')}`}</div>
+            <p>{competitionTimer.label}</p>
+            <div className="hero-timer">{competitionTimer.value}</div>
           </div>
         </header>
 
@@ -221,7 +261,7 @@ function DashboardPage({
               </button>
             </div>
             <p className="stat-note">
-              SHARE THIS CODE WITH YOUR TEAMMATES AFTER THEY ENTER THE TEAM NAME.
+              {memberSummary}
             </p>
             {copyStatus ? <p className="terminal-feedback invite-feedback">{copyStatus}</p> : null}
           </section>
@@ -299,13 +339,13 @@ function DashboardPage({
         {errorMessage ? <div className="dashboard-banner dashboard-banner-error">{errorMessage}</div> : null}
         {!errorMessage && isLoading ? <div className="dashboard-banner">Loading dashboard telemetry...</div> : null}
         {!errorMessage && competition?.effective_status === 'not_started' ? (
-          <div className="dashboard-banner">比赛尚未开始，正式成绩提交已锁定。</div>
+          <div className="dashboard-banner">Competition has not started yet. Score submission is locked.</div>
         ) : null}
         {!errorMessage && competition?.effective_status === 'ended' ? (
-          <div className="dashboard-banner">比赛已结束，排行榜已经固定。</div>
+          <div className="dashboard-banner">Competition has ended. The leaderboard is now fixed.</div>
         ) : null}
         {!errorMessage && competition && !competition.allow_submission ? (
-          <div className="dashboard-banner">教师暂时关闭了成绩提交入口。</div>
+          <div className="dashboard-banner">Score submission is temporarily disabled by the teacher.</div>
         ) : null}
 
         <section className="leaderboard-panel">

@@ -51,7 +51,7 @@ function formatRemainingAttempts(remaining, limit) {
   return `${remaining}/${limit}`;
 }
 
-function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }) {
+function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, isTrainingActive = false }) {
   const [bootstrap, setBootstrap] = useState(null);
   const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,11 +81,19 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
         startTransition(() => {
           setBootstrap(response);
           setResult(null);
-          setStatusMessage('Validation images are ready. Run local inference when you are ready.');
-          setLogLines([
-            createLogLine(`Challenge ${response.submission_id.slice(0, 8)} prepared with ${response.sample_count} MNIST samples.`),
-            createLogLine('Only prediction labels will be sent back to the backend.'),
-          ]);
+          if (response.submission_available) {
+            setStatusMessage('Validation images are ready. Run local inference when you are ready.');
+            setLogLines([
+              createLogLine(`Challenge ${response.submission_id.slice(0, 8)} prepared with ${response.sample_count} MNIST samples.`),
+              createLogLine('Only prediction labels will be sent back to the backend.'),
+            ]);
+          } else {
+            setStatusMessage(response.submission_block_reason || 'Submission is temporarily unavailable.');
+            setLogLines([
+              createLogLine('Submit page data loaded successfully.'),
+              createLogLine(response.submission_block_reason || 'Submission is temporarily unavailable.'),
+            ]);
+          }
         });
       } catch (error) {
         if (!isActive) {
@@ -113,6 +121,8 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
   const lastRun = bootstrap?.latest_run || null;
   const remainingTeamAttempts = result?.remaining_team_attempts ?? bootstrap?.remaining_team_attempts;
   const teamSubmissionLimit = result?.team_submission_limit ?? bootstrap?.team_submission_limit;
+  const submissionAvailable = Boolean(bootstrap?.submission_available);
+  const submissionBlockReason = bootstrap?.submission_block_reason || '';
   const currentTeamEntry = useMemo(
     () => findCurrentTeamEntry(leaderboard, session?.team?.id),
     [leaderboard, session?.team?.id],
@@ -130,7 +140,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
   ];
 
   async function handleSubmit() {
-    if (!bootstrap || isSubmitting) {
+    if (!bootstrap || isSubmitting || !bootstrap.submission_available || !bootstrap.submission_id) {
       return;
     }
 
@@ -203,6 +213,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
       session={session}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
+      isTrainingActive={isTrainingActive}
     >
       <main className="submission-main">
         <div className="submission-grid">
@@ -257,7 +268,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
                 type="button"
                 className="submit-cta"
                 onClick={handleSubmit}
-                disabled={isLoading || isSubmitting || !trainingUnlocked}
+                disabled={isLoading || isSubmitting || !trainingUnlocked || !submissionAvailable}
               >
                 <div className="submit-ring" aria-hidden="true" />
                 <span
@@ -273,7 +284,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
             <div className="success-card">
               <div className="success-copy">
                 <div className="success-icon-box">
-                  <span className="material-symbols-outlined">{result ? 'verified' : 'memory'}</span>
+                  <span className="material-symbols-outlined">{result ? 'verified' : 'inventory_2'}</span>
                 </div>
                 <div>
                   <p>{result ? 'Scored!' : 'Ready'}</p>
@@ -291,6 +302,11 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false }
             </div>
 
             {errorMessage ? <div className="submission-banner submission-banner-error">{errorMessage}</div> : null}
+            {!errorMessage && trainingUnlocked && !submissionAvailable && submissionBlockReason ? (
+              <div className="submission-banner submission-banner-warning">
+                {submissionBlockReason}
+              </div>
+            ) : null}
             {!errorMessage && !trainingUnlocked ? (
               <div className="submission-banner submission-banner-warning">
                 Annotation goal is not unlocked yet, so submissions stay disabled.

@@ -227,20 +227,44 @@ def _validate_submission_limits(
         )
 
 
+def _get_submission_limit_error(
+    connection,
+    competition_id: str,
+    user_id: str,
+    team_id: str,
+    now: datetime,
+    *,
+    submission_cooldown_minutes: int,
+    submission_limit: int,
+) -> Optional[str]:
+    try:
+        _validate_submission_limits(
+            connection,
+            competition_id,
+            user_id,
+            team_id,
+            now,
+            submission_cooldown_minutes=submission_cooldown_minutes,
+            submission_limit=submission_limit,
+        )
+    except ValidationError as error:
+        return str(error)
+
+    return None
+
+
 def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapResponse:
     model_config = get_model_config(session_token)
     _ensure_team_membership(model_config.user_id, model_config.team_id)
     competition = ensure_submissions_open(model_config.competition_id)
 
-    dataset = _get_dataset()
-    sample_indexes = random.sample(range(len(dataset.labels)), SUBMISSION_SAMPLE_COUNT)
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
-    expires_at = (now_dt + timedelta(minutes=settings.submission_challenge_ttl_minutes)).isoformat()
-    submission_id = str(uuid4())
+    sample_indexes: List[int] = []
+    submission_id: Optional[str] = None
 
     with get_connection() as connection:
-        _validate_submission_limits(
+        submission_block_reason = _get_submission_limit_error(
             connection,
             model_config.competition_id,
             model_config.user_id,
@@ -249,39 +273,44 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
             submission_cooldown_minutes=competition.submission_cooldown_minutes,
             submission_limit=competition.submission_limit,
         )
-        connection.execute(
-            """
-            UPDATE submission_challenges
-            SET expires_at = ?
-            WHERE competition_id = ? AND user_id = ? AND team_id = ? AND used_at IS NULL AND expires_at > ?
-            """,
-            (now, model_config.competition_id, model_config.user_id, model_config.team_id, now),
-        )
-        connection.execute(
-            """
-            INSERT INTO submission_challenges (
-                id,
-                user_id,
-                team_id,
-                competition_id,
-                sample_indexes_json,
-                used_at,
-                expires_at,
-                created_at
+        if not submission_block_reason:
+            dataset = _get_dataset()
+            sample_indexes = random.sample(range(len(dataset.labels)), SUBMISSION_SAMPLE_COUNT)
+            expires_at = (now_dt + timedelta(minutes=settings.submission_challenge_ttl_minutes)).isoformat()
+            submission_id = str(uuid4())
+            connection.execute(
+                """
+                UPDATE submission_challenges
+                SET expires_at = ?
+                WHERE competition_id = ? AND user_id = ? AND team_id = ? AND used_at IS NULL AND expires_at > ?
+                """,
+                (now, model_config.competition_id, model_config.user_id, model_config.team_id, now),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                submission_id,
-                model_config.user_id,
-                model_config.team_id,
-                model_config.competition_id,
-                json.dumps(sample_indexes),
-                None,
-                expires_at,
-                now,
-            ),
-        )
+            connection.execute(
+                """
+                INSERT INTO submission_challenges (
+                    id,
+                    user_id,
+                    team_id,
+                    competition_id,
+                    sample_indexes_json,
+                    used_at,
+                    expires_at,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    submission_id,
+                    model_config.user_id,
+                    model_config.team_id,
+                    model_config.competition_id,
+                    json.dumps(sample_indexes),
+                    None,
+                    expires_at,
+                    now,
+                ),
+            )
 
         latest_run_row = connection.execute(
             """
@@ -318,13 +347,16 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
         )
         connection.commit()
 
-    challenge_images = [
-        SubmissionChallengeImagePayload(
-            index=sample_index,
-            pixels_b64=base64.b64encode(dataset.images[sample_index]).decode("ascii"),
-        )
-        for sample_index in sample_indexes
-    ]
+    challenge_images: List[SubmissionChallengeImagePayload] = []
+    if sample_indexes:
+        dataset = _get_dataset()
+        challenge_images = [
+            SubmissionChallengeImagePayload(
+                index=sample_index,
+                pixels_b64=base64.b64encode(dataset.images[sample_index]).decode("ascii"),
+            )
+            for sample_index in sample_indexes
+        ]
 
     return SubmissionBootstrapResponse(
         submission_id=submission_id,
@@ -334,6 +366,8 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
         competition=competition,
         team_submission_limit=competition.submission_limit,
         remaining_team_attempts=remaining_team_attempts,
+        submission_available=not submission_block_reason,
+        submission_block_reason=submission_block_reason,
         challenge_images=challenge_images,
         modeling_config=model_config,
         latest_run=_serialize_run(latest_run_row),

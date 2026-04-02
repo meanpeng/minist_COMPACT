@@ -107,7 +107,7 @@ def create_team_route(payload: TeamCreateRequest) -> SessionResponse:
 
 @app.post("/api/auth/join-team", response_model=SessionResponse)
 def join_team_route(payload: TeamJoinRequest) -> SessionResponse:
-    return join_team(payload.competition_id, payload.username, payload.team_name, payload.invite_code)
+    return join_team(payload.competition_id, payload.username, payload.invite_code)
 
 
 @app.get("/api/competitions", response_model=List[CompetitionPayload])

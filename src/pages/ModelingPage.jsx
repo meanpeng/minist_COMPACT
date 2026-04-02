@@ -228,7 +228,7 @@ function buildCanvasNodes(hiddenLayers) {
   return nodes;
 }
 
-function ModelingPage({ session, onResetExperiment, trainingUnlocked = false }) {
+function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, isTrainingActive = false }) {
   const [hiddenLayers, setHiddenLayers] = useState([]);
   const [savedHiddenLayers, setSavedHiddenLayers] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState('fixed-input');
@@ -389,6 +389,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false }) 
       session={session}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
+      isTrainingActive={isTrainingActive}
     >
       <main className="modeling-main">
         <section className="module-drawer">

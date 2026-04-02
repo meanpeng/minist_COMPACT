@@ -5,9 +5,7 @@ function BeginPage({ onSessionReady, session }) {
   const [competitions, setCompetitions] = useState([]);
   const [username, setUsername] = useState(session?.user?.username || '');
   const [teamName, setTeamName] = useState('');
-  const [joinTeamName, setJoinTeamName] = useState('');
   const [joinInviteCode, setJoinInviteCode] = useState('');
-  const [isJoinInvitePromptOpen, setIsJoinInvitePromptOpen] = useState(false);
   const [activeAction, setActiveAction] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [serverStatus, setServerStatus] = useState('checking');
@@ -115,24 +113,13 @@ function BeginPage({ onSessionReady, session }) {
     }
   };
 
-  const openJoinInvitePrompt = () => {
+  const submitJoinTeam = async () => {
     if (!validateCommonFields()) {
       return;
     }
 
-    if (!joinTeamName.trim()) {
-      setErrorMessage('Please enter a team name.');
-      return;
-    }
-
-    setJoinInviteCode('');
-    setErrorMessage('');
-    setIsJoinInvitePromptOpen(true);
-  };
-
-  const submitJoinTeam = async () => {
     if (!joinInviteCode.trim()) {
-      setErrorMessage('Please enter the invite code for this team.');
+      setErrorMessage('Please enter the invite code.');
       return;
     }
 
@@ -143,10 +130,8 @@ function BeginPage({ onSessionReady, session }) {
       const nextSession = await joinTeam({
         competition_id: selectedCompetitionId,
         username: username.trim(),
-        team_name: joinTeamName.trim(),
         invite_code: joinInviteCode.trim(),
       });
-      setIsJoinInvitePromptOpen(false);
       onSessionReady(nextSession);
     } catch (error) {
       setErrorMessage(error instanceof ApiError ? error.message : 'Unable to join team right now.');
@@ -165,6 +150,9 @@ function BeginPage({ onSessionReady, session }) {
           <div className="begin-admin-entry">
             <a href="#admin" className="begin-admin-link">
               Teacher Admin
+            </a>
+            <a href="#admin-v2" className="begin-admin-link begin-admin-link-alt">
+              Teacher Admin V2
             </a>
           </div>
 
@@ -288,30 +276,27 @@ function BeginPage({ onSessionReady, session }) {
                     </div>
 
                     <p>
-                      Join an existing team in the current competition. Team lookup and invite codes are matched
-                      against this competition automatically.
+                      Join an existing team in the current competition directly with the invite code.
+                      The system will match the target team automatically.
                     </p>
 
                     <div className="command-actions">
-                      <div className="search-wrap">
-                        <input
-                          className="terminal-input terminal-input-secondary"
-                          placeholder="SEARCH_TEAM_NAME"
-                          type="text"
-                          value={joinTeamName}
-                          onChange={(event) => setJoinTeamName(event.target.value)}
-                          disabled={hasActiveTeamSession}
-                        />
-                        <span className="material-symbols-outlined search-icon">search</span>
-                      </div>
+                      <input
+                        className="terminal-input terminal-input-secondary"
+                        placeholder="ENTER_INVITE_CODE"
+                        type="text"
+                        value={joinInviteCode}
+                        onChange={(event) => setJoinInviteCode(event.target.value.toUpperCase())}
+                        disabled={hasActiveTeamSession}
+                      />
 
                       <button
                         type="button"
                         className="arcade-button arcade-button-secondary"
-                        onClick={openJoinInvitePrompt}
+                        onClick={submitJoinTeam}
                         disabled={activeAction === 'join' || hasActiveTeamSession || !selectedCompetitionId}
                       >
-                        {activeAction === 'join' ? 'VERIFYING...' : 'NEXT_ENTER_INVITE_CODE'}
+                        {activeAction === 'join' ? 'JOINING...' : 'JOIN_WITH_INVITE_CODE'}
                       </button>
                     </div>
 
@@ -333,7 +318,7 @@ function BeginPage({ onSessionReady, session }) {
                 </div>
 
                 <div className="footer-meta">2026 BITLAB_CORP // AUTO_MATCH_BINDING</div>
-                <div className="footer-meta">STUDENT_ENTRY // TWO_STEP_FLOW</div>
+                <div className="footer-meta">STUDENT_ENTRY // DIRECT_INVITE_JOIN</div>
               </footer>
             </div>
           </div>
@@ -345,55 +330,6 @@ function BeginPage({ onSessionReady, session }) {
           <div className="pixel-accent pixel-accent-right" aria-hidden="true" />
         </div>
       </main>
-
-      {isJoinInvitePromptOpen ? (
-        <div className="terminal-modal-backdrop" role="presentation">
-          <div className="terminal-modal arcade-shadow-secondary" role="dialog" aria-modal="true">
-            <div className="terminal-modal-header">
-              <div>
-                <p className="terminal-modal-kicker">TEAM VERIFICATION</p>
-                <h3>ENTER_INVITE_CODE</h3>
-              </div>
-              <button
-                type="button"
-                className="terminal-modal-close"
-                onClick={() => setIsJoinInvitePromptOpen(false)}
-                disabled={activeAction === 'join'}
-                aria-label="Close invite code dialog"
-              >
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            <p className="terminal-modal-copy">
-              {`TARGET_COMPETITION // ${(selectedCompetition?.name || '').toUpperCase()}`}
-            </p>
-
-            <p className="terminal-modal-copy">
-              {`TARGET_TEAM // ${joinTeamName.trim().toUpperCase()}`}
-            </p>
-
-            <input
-              className="terminal-input terminal-input-secondary terminal-modal-input"
-              placeholder="ENTER_INVITE_CODE"
-              type="text"
-              value={joinInviteCode}
-              onChange={(event) => setJoinInviteCode(event.target.value.toUpperCase())}
-            />
-
-            <div className="terminal-modal-actions">
-              <button
-                type="button"
-                className="arcade-button arcade-button-secondary"
-                onClick={submitJoinTeam}
-                disabled={activeAction === 'join'}
-              >
-                {activeAction === 'join' ? 'JOINING...' : 'CONFIRM_AND_JOIN'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }

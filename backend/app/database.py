@@ -385,6 +385,8 @@ def init_db() -> None:
                 epochs INTEGER NOT NULL,
                 learning_rate REAL NOT NULL,
                 trained_sample_count INTEGER NOT NULL,
+                augmentation_modes_json TEXT NOT NULL DEFAULT '[]',
+                augment_copies INTEGER NOT NULL DEFAULT 1,
                 final_loss REAL,
                 final_accuracy REAL,
                 final_val_loss REAL,
@@ -453,6 +455,8 @@ def init_db() -> None:
 
         _ensure_column(connection, "submission_challenges", "used_at", "TEXT")
         _ensure_column(connection, "submission_challenges", "expires_at", "TEXT")
+        _ensure_column(connection, "user_training_runs", "augmentation_modes_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "user_training_runs", "augment_copies", "INTEGER NOT NULL DEFAULT 1")
 
         now = datetime.now(timezone.utc).isoformat()
         connection.execute(
@@ -534,6 +538,7 @@ def init_db() -> None:
 def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(settings.database_path)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         yield connection
     finally:

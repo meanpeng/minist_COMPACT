@@ -7,11 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:team1-grid": "node scripts/searchTeam1Hyperparams.mjs",
+    "test:mixed-mnist": "node scripts/testMixedMnistTraining.mjs"
   },
   "keywords": [],
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
+    "pngjs": "^7.0.0",
     "vite": "^8.0.3"
   },
   "dependencies": {

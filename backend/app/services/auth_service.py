@@ -212,9 +212,8 @@ def create_team(competition_id: str, username: str, team_name: str) -> SessionRe
         return session
 
 
-def join_team(competition_id: str, username: str, team_name: str, invite_code: str) -> SessionResponse:
+def join_team(competition_id: str, username: str, invite_code: str) -> SessionResponse:
     normalized_username = _normalize_name(username, "Username")
-    normalized_team_name = _normalize_name(team_name, "Team name")
     normalized_invite_code = _normalize_invite_code(invite_code)
 
     with get_connection() as connection:
@@ -223,27 +222,25 @@ def join_team(competition_id: str, username: str, team_name: str, invite_code: s
         if competition.effective_status != "running":
             raise ValidationError("Only running competitions can be joined from the student entry.")
 
+        team = connection.execute(
+            """
+            SELECT id, name, invite_code
+            FROM teams
+            WHERE competition_id = ? AND upper(invite_code) = ?
+            """,
+            (competition_id, normalized_invite_code),
+        ).fetchone()
+        if not team:
+            raise NotFoundError("Invite code was not found in the selected competition.")
+
         existing_user_any_team = _fetch_existing_user_by_username(connection, competition_id, normalized_username)
         if existing_user_any_team:
-            if existing_user_any_team["team_name"].lower() == normalized_team_name.lower():
+            if existing_user_any_team["team_id"] == team["id"]:
                 return _issue_session(connection, existing_user_any_team["user_id"])
             raise ConflictError(
                 f"Username already joined team {existing_user_any_team['team_name']} in this competition. "
                 "Please use that team or choose a different username."
             )
-
-        team = connection.execute(
-            """
-            SELECT id, name, invite_code
-            FROM teams
-            WHERE competition_id = ? AND lower(name) = lower(?)
-            """,
-            (competition_id, normalized_team_name),
-        ).fetchone()
-        if not team:
-            raise NotFoundError("Team name was not found in the selected competition.")
-        if team["invite_code"].upper() != normalized_invite_code:
-            raise ValidationError("Invite code is incorrect. Please confirm it with your team captain.")
 
         user_id = str(uuid4())
         created_at = datetime.now(timezone.utc).isoformat()

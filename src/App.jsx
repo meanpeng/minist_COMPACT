@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import AdminPage from './pages/AdminPage';
+import AdminNeoPage from './pages/AdminNeoPage';
 import AnnotationPage from './pages/AnnotationPage';
 import BeginPage from './pages/BeginPage';
 import DashboardPage from './pages/DashboardPage';
@@ -17,7 +18,7 @@ import {
 } from './lib/session';
 
 const DEFAULT_ROUTE = 'begin';
-const VALID_ROUTES = new Set(['begin', 'dashboard', 'annotation', 'modeling', 'training', 'submission', 'admin']);
+const VALID_ROUTES = new Set(['begin', 'dashboard', 'annotation', 'modeling', 'training', 'submission', 'admin', 'admin-v2']);
 
 function areAnnotationStatsEqual(currentStats, nextStats) {
   if (!currentStats || !nextStats) {
@@ -47,6 +48,7 @@ function App() {
   const [annotationStats, setAnnotationStats] = useState(() => loadStoredAnnotationStats());
   const [isAnnotationStatsLoading, setIsAnnotationStatsLoading] = useState(false);
   const [inviteCodeNotice, setInviteCodeNotice] = useState(null);
+  const [isTrainingActive, setIsTrainingActive] = useState(false);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -54,12 +56,18 @@ function App() {
     }
 
     const handleHashChange = () => {
+      if (isTrainingActive && getRouteFromHash() !== 'training') {
+        window.history.replaceState(null, '', '#training');
+        setRoute('training');
+        return;
+      }
+
       setRoute(getRouteFromHash());
     };
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [isTrainingActive]);
 
   useEffect(() => {
     if (!session?.session_token) {
@@ -151,7 +159,7 @@ function App() {
   }, [session?.session_token]);
 
   useEffect(() => {
-    if (!isBootstrapping && !session && route !== 'begin' && route !== 'admin') {
+    if (!isBootstrapping && !session && route !== 'begin' && route !== 'admin' && route !== 'admin-v2') {
       window.location.hash = 'begin';
     }
   }, [isBootstrapping, route, session]);
@@ -164,6 +172,13 @@ function App() {
       window.location.hash = 'annotation';
     }
   }, [annotationStats, isBootstrapping, isTrainingUnlocked, route, session]);
+
+  useEffect(() => {
+    if (isTrainingActive && route !== 'training') {
+      window.history.replaceState(null, '', '#training');
+      setRoute('training');
+    }
+  }, [isTrainingActive, route]);
 
   const handleSessionReady = (nextSession, options = {}) => {
     setSession(nextSession);
@@ -193,12 +208,17 @@ function App() {
     return <AdminPage />;
   }
 
+  if (route === 'admin-v2') {
+    return <AdminNeoPage />;
+  }
+
   if (route === 'annotation') {
     return (
       <AnnotationPage
         session={session}
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
+        isTrainingActive={isTrainingActive}
         stats={annotationStats}
         isStatsLoading={isAnnotationStatsLoading}
         onAnnotationStatsChange={(nextStats) => {
@@ -221,6 +241,7 @@ function App() {
         session={session}
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
+        isTrainingActive={isTrainingActive}
       />
     );
   }
@@ -231,6 +252,8 @@ function App() {
         session={session}
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
+        isTrainingActive={isTrainingActive}
+        onTrainingStateChange={setIsTrainingActive}
       />
     );
   }
@@ -241,6 +264,7 @@ function App() {
         session={session}
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
+        isTrainingActive={isTrainingActive}
       />
     );
   }
@@ -250,6 +274,7 @@ function App() {
       session={session}
       onResetExperiment={handleResetExperiment}
       trainingUnlocked={isTrainingUnlocked}
+      isTrainingActive={isTrainingActive}
       inviteCodeNotice={inviteCodeNotice}
       onDismissInviteCodeNotice={() => setInviteCodeNotice(null)}
     />

@@ -18,9 +18,23 @@ import {
 const DEFAULT_BATCH_SIZE = 16;
 const DEFAULT_EPOCHS = 8;
 const DEFAULT_LEARNING_RATE = 0.001;
+const DEFAULT_AUGMENT_COPIES = 1;
 const BATCH_SIZE_OPTIONS = [8, 16, 32, 64];
 const EPOCH_OPTIONS = [5, 8, 10, 15, 20];
 const LEARNING_RATE_OPTIONS = [0.0005, 0.001, 0.002, 0.005];
+const AUGMENT_COPIES_OPTIONS = [1, 2, 3, 4];
+const AUGMENTATION_OPTIONS = [
+  { value: 'shift', label: '平移' },
+  { value: 'scale', label: '缩放' },
+  { value: 'rotation', label: '旋转' },
+  { value: 'affine', label: '仿射变换' },
+];
+const AUGMENTATION_LABELS = {
+  shift: 'Shift',
+  scale: 'Scale',
+  rotation: 'Rotation',
+  affine: 'Affine',
+};
 const LOG_LIMIT = 8;
 
 const EMPTY_PROGRESS = {
@@ -75,6 +89,14 @@ function toChartPoints(values) {
 
 function createLogLine(message) {
   return [`[${new Date().toLocaleTimeString()}]`, message];
+}
+
+function formatAugmentationModes(modes) {
+  if (!modes?.length) {
+    return 'None';
+  }
+
+  return modes.map((mode) => AUGMENTATION_LABELS[mode] || mode).join(', ');
 }
 
 function getMetricValue(logs, primaryKey, fallbackKey) {
@@ -183,6 +205,145 @@ async function createDatasetTensors(samples) {
   };
 }
 
+function createPrng(seed) {
+  let state = seed >>> 0;
+  return function next() {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInt(rng, min, max) {
+  return Math.floor(rng() * (max - min + 1)) + min;
+}
+
+function randomFloat(rng, min, max) {
+  return rng() * (max - min) + min;
+}
+
+function translateImage(image, dx, dy) {
+  const padTop = Math.max(dy, 0);
+  const padBottom = Math.max(-dy, 0);
+  const padLeft = Math.max(dx, 0);
+  const padRight = Math.max(-dx, 0);
+  const startY = dy < 0 ? -dy : 0;
+  const startX = dx < 0 ? -dx : 0;
+
+  return tf.tidy(() => {
+    const padded = tf.pad(image, [
+      [padTop, padBottom],
+      [padLeft, padRight],
+      [0, 0],
+    ]);
+    return padded.slice([startY, startX, 0], [IMAGE_SIZE, IMAGE_SIZE, 1]);
+  });
+}
+
+function scaleImage(image, scale) {
+  return tf.tidy(() => {
+    const scaledSize = Math.max(18, Math.round(IMAGE_SIZE * scale));
+    const expanded = image.expandDims(0);
+    const resized = tf.image.resizeBilinear(expanded, [scaledSize, scaledSize], false).squeeze([0]);
+
+    if (scaledSize >= IMAGE_SIZE) {
+      const offset = Math.floor((scaledSize - IMAGE_SIZE) / 2);
+      return resized.slice([offset, offset, 0], [IMAGE_SIZE, IMAGE_SIZE, 1]);
+    }
+
+    const padBefore = Math.floor((IMAGE_SIZE - scaledSize) / 2);
+    const padAfter = IMAGE_SIZE - scaledSize - padBefore;
+    return tf.pad(resized, [
+      [padBefore, padAfter],
+      [padBefore, padAfter],
+      [0, 0],
+    ]);
+  });
+}
+
+function rotateImage(image, angle) {
+  return tf.tidy(() => {
+    if (typeof tf.image.rotateWithOffset !== 'function') {
+      return image.clone();
+    }
+
+    const batched = image.expandDims(0);
+    const rotated = tf.image.rotateWithOffset(batched, angle, 0, 0, 'bilinear', 0);
+    return rotated.squeeze([0]);
+  });
+}
+
+function augmentOneImage(image, rng, selectedModes) {
+  return tf.tidy(() => {
+    let augmented = image.clone();
+
+    if (selectedModes.includes('rotation')) {
+      const angle = randomFloat(rng, -0.22, 0.22);
+      augmented = rotateImage(augmented, angle);
+    }
+
+    if (selectedModes.includes('shift')) {
+      const dx = randomInt(rng, -2, 2);
+      const dy = randomInt(rng, -2, 2);
+      augmented = translateImage(augmented, dx, dy);
+    }
+
+    if (selectedModes.includes('scale')) {
+      const scale = randomFloat(rng, 0.88, 1.12);
+      augmented = scaleImage(augmented, scale);
+    }
+
+    if (selectedModes.includes('affine')) {
+      const angle = randomFloat(rng, -0.18, 0.18);
+      augmented = rotateImage(augmented, angle);
+      augmented = scaleImage(augmented, randomFloat(rng, 0.9, 1.08));
+      augmented = translateImage(augmented, randomInt(rng, -3, 3), randomInt(rng, -3, 3));
+    }
+
+    return augmented.clipByValue(0, 1).clone();
+  });
+}
+
+function buildAugmentedDataset(xs, ys, selectedModes, augmentCopies) {
+  if (!selectedModes.length) {
+    return {
+      xs,
+      ys,
+      dispose: false,
+      effectiveSampleCount: xs.shape[0],
+    };
+  }
+
+  const baseImages = tf.unstack(xs);
+  const rng = createPrng(123456789);
+  const imageVariants = [xs];
+  const labelVariants = [ys];
+
+  for (let copyIndex = 0; copyIndex < augmentCopies; copyIndex += 1) {
+    const augmentedImages = baseImages.map((image) => augmentOneImage(image, rng, selectedModes));
+    const augmentedXs = tf.stack(augmentedImages);
+    imageVariants.push(augmentedXs);
+    labelVariants.push(ys.clone());
+    augmentedImages.forEach((image) => image.dispose());
+  }
+
+  const finalXs = tf.concat(imageVariants, 0);
+  const finalYs = tf.concat(labelVariants, 0);
+
+  baseImages.forEach((image) => image.dispose());
+  imageVariants.slice(1).forEach((tensor) => tensor.dispose());
+  labelVariants.slice(1).forEach((tensor) => tensor.dispose());
+
+  return {
+    xs: finalXs,
+    ys: finalYs,
+    dispose: true,
+    effectiveSampleCount: xs.shape[0] * (augmentCopies + 1),
+  };
+}
+
 function buildMetricsFromRun(run) {
   if (!run?.logs?.length) {
     return createEmptyMetrics();
@@ -212,7 +373,13 @@ function buildLogFeed(run) {
     );
 }
 
-function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) {
+function TrainingPage({
+  session,
+  onResetExperiment,
+  trainingUnlocked = false,
+  isTrainingActive = false,
+  onTrainingStateChange,
+}) {
   const [bootstrap, setBootstrap] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isTraining, setIsTraining] = useState(false);
@@ -221,6 +388,8 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
   const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
   const [epochs, setEpochs] = useState(DEFAULT_EPOCHS);
   const [learningRate, setLearningRate] = useState(DEFAULT_LEARNING_RATE);
+  const [augmentCopies, setAugmentCopies] = useState(DEFAULT_AUGMENT_COPIES);
+  const [augmentationModes, setAugmentationModes] = useState([]);
   const [metrics, setMetrics] = useState(createEmptyMetrics);
   const [logFeed, setLogFeed] = useState(() => [createLogLine('Awaiting training command. CPU backend will be enforced.')]);
   const [progress, setProgress] = useState(EMPTY_PROGRESS);
@@ -256,6 +425,8 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
           setBatchSize(response.latest_run?.batch_size || DEFAULT_BATCH_SIZE);
           setEpochs(response.latest_run?.epochs || DEFAULT_EPOCHS);
           setLearningRate(response.latest_run?.learning_rate || DEFAULT_LEARNING_RATE);
+          setAugmentCopies(response.latest_run?.augment_copies || DEFAULT_AUGMENT_COPIES);
+          setAugmentationModes(response.latest_run?.augmentation_modes || []);
           setProgress(
             response.latest_run
               ? {
@@ -291,6 +462,8 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
   const sampleCount = bootstrap?.samples?.length || 0;
   const modelConfig = bootstrap?.modeling_config || null;
   const lastRun = bootstrap?.latest_run || null;
+  const augmentationSummary = formatAugmentationModes(augmentationModes);
+  const lastRunAugmentationSummary = formatAugmentationModes(lastRun?.augmentation_modes || []);
   const currentLoss = metrics.loss.at(-1) ?? lastRun?.final_loss ?? null;
   const currentAccuracy = metrics.accuracy.at(-1) ?? lastRun?.final_accuracy ?? null;
   const currentValAccuracy = metrics.valAccuracy.at(-1) ?? lastRun?.final_val_accuracy ?? null;
@@ -311,6 +484,12 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
     trainingRef.current = isTraining;
   }, [isTraining]);
 
+  useEffect(() => {
+    onTrainingStateChange?.(isTraining);
+  }, [isTraining, onTrainingStateChange]);
+
+  useEffect(() => () => onTrainingStateChange?.(false), [onTrainingStateChange]);
+
   async function handleStartTraining() {
     if (!bootstrap || !modelConfig || trainingRef.current) {
       return;
@@ -318,6 +497,8 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
 
     let xs = null;
     let ys = null;
+    let trainingXs = null;
+    let trainingYs = null;
     let model = null;
 
     setIsTraining(true);
@@ -343,10 +524,13 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
 
       const dataset = await createDatasetTensors(trainingSamples);
       ({ xs, ys } = dataset);
+      const trainingDataset = buildAugmentedDataset(xs, ys, augmentationModes, augmentCopies);
+      trainingXs = trainingDataset.xs;
+      trainingYs = trainingDataset.ys;
       setLogFeed((current) => [
         ...current.slice(-(LOG_LIMIT - 1)),
         createLogLine(
-          `${dataset.usableSampleCount} samples loaded.${dataset.skippedSampleCount ? ` Skipped ${dataset.skippedSampleCount} missing files.` : ''} Building model graph...`,
+          `${dataset.usableSampleCount} samples loaded.${dataset.skippedSampleCount ? ` Skipped ${dataset.skippedSampleCount} missing files.` : ''} 增强: ${augmentationSummary}。Effective train set: ${trainingDataset.effectiveSampleCount}. Building model graph...`,
         ),
       ]);
 
@@ -356,7 +540,7 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
 
       setStatusMessage('CPU training in progress...');
 
-      await model.fit(xs, ys, {
+      await model.fit(trainingXs, trainingYs, {
         batchSize,
         epochs,
         shuffle: true,
@@ -415,6 +599,8 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
         epochs,
         learning_rate: learningRate,
         trained_sample_count: dataset.usableSampleCount,
+        augmentation_modes: augmentationModes,
+        augment_copies: augmentationModes.length ? augmentCopies : 1,
         backend: 'cpu',
         final_loss: finalPoint?.loss ?? null,
         final_accuracy: finalPoint?.accuracy ?? null,
@@ -435,7 +621,7 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
       setLogFeed((current) => [
         ...current.slice(-(LOG_LIMIT - 1)),
         createLogLine(
-          `Training complete on ${dataset.usableSampleCount} samples | final acc ${toDisplayPercent(savedRun.final_accuracy)}${
+          `Training complete on ${dataset.usableSampleCount} base samples (${augmentationSummary}, copies ${augmentationModes.length ? augmentCopies : 0}, effective ${trainingXs.shape[0]}) | final acc ${toDisplayPercent(savedRun.final_accuracy)}${
             typeof savedRun.final_val_accuracy === 'number'
               ? ` | final val ${toDisplayPercent(savedRun.final_val_accuracy)}`
               : ''
@@ -455,6 +641,12 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
     } finally {
       xs?.dispose();
       ys?.dispose();
+      if (trainingXs && trainingXs !== xs) {
+        trainingXs.dispose();
+      }
+      if (trainingYs && trainingYs !== ys) {
+        trainingYs.dispose();
+      }
       model?.dispose();
       setIsTraining(false);
     }
@@ -466,6 +658,7 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
       session={session}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
+      isTrainingActive={isTrainingActive}
     >
       <main className="training-main">
         <div className="training-backdrop" aria-hidden="true">
@@ -495,42 +688,90 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
                 </h2>
 
                 <div className="training-form">
-                  <label>
-                    <span>Batch Size</span>
-                    <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))} disabled={isTraining}>
-                      {BATCH_SIZE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="training-param-grid">
+                    <label>
+                      <span>Batch Size</span>
+                      <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))} disabled={isTraining}>
+                        {BATCH_SIZE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label>
-                    <span>Epochs</span>
-                    <select value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={isTraining}>
-                      {EPOCH_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label>
+                      <span>Epochs</span>
+                      <select value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={isTraining}>
+                        {EPOCH_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label>
-                    <span>Learning Rate</span>
-                    <select
-                      value={learningRate}
-                      onChange={(event) => setLearningRate(Number(event.target.value))}
-                      disabled={isTraining}
-                    >
-                      {LEARNING_RATE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label>
+                      <span>Learning Rate</span>
+                      <select
+                        value={learningRate}
+                        onChange={(event) => setLearningRate(Number(event.target.value))}
+                        disabled={isTraining}
+                      >
+                        {LEARNING_RATE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Aug Copies</span>
+                      <select
+                        value={augmentCopies}
+                        onChange={(event) => setAugmentCopies(Number(event.target.value))}
+                        disabled={isTraining || !augmentationModes.length}
+                      >
+                        {AUGMENT_COPIES_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="training-multiselect">
+                    <span className="training-multiselect-title">Data Augmentation</span>
+                    <div className="training-augmentation-list">
+                      {AUGMENTATION_OPTIONS.map((option) => {
+                        const checked = augmentationModes.includes(option.value);
+                        return (
+                          <label
+                            key={option.value}
+                            className={checked ? 'training-augmentation-option training-augmentation-option-active' : 'training-augmentation-option'}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isTraining}
+                              className="training-augmentation-input"
+                              onChange={() => {
+                                setAugmentationModes((current) =>
+                                  current.includes(option.value)
+                                    ? current.filter((item) => item !== option.value)
+                                    : [...current, option.value],
+                                );
+                              }}
+                            />
+                            <strong>{AUGMENTATION_LABELS[option.value] || option.label}</strong>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="training-selection-summary">{`Selected: ${augmentationSummary}`}</div>
+                  </div>
 
                   <button type="button" className="training-start-button" onClick={handleStartTraining} disabled={!canTrain}>
                     {isTraining ? 'TRAINING...' : 'START TRAINING'}
@@ -561,6 +802,10 @@ function TrainingPage({ session, onResetExperiment, trainingUnlocked = false }) 
                 <div className="dataset-item">
                   <span>Memory</span>
                   <strong>{modelConfig?.summary?.estimated_memory_mb ?? '--'} MB</strong>
+                </div>
+                <div className="dataset-item">
+                  <span>Last Augment</span>
+                  <strong>{lastRunAugmentationSummary}</strong>
                 </div>
               </div>
             </section>

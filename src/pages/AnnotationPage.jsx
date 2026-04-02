@@ -21,6 +21,7 @@ function AnnotationPage({
   session,
   onResetExperiment,
   trainingUnlocked = false,
+  isTrainingActive = false,
   stats,
   isStatsLoading = false,
   onAnnotationStatsChange,
@@ -410,6 +411,7 @@ function AnnotationPage({
       session={session}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
+      isTrainingActive={isTrainingActive}
     >
       <main className="annotation-main">
         <div className="annotation-bg annotation-bg-primary" aria-hidden="true" />
