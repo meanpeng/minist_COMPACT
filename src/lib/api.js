@@ -1,6 +1,20 @@
 import { loadStoredAdminToken } from './session';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:8000';
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || '';
+
+function getApiBaseUrl() {
+  if (RAW_API_BASE_URL) {
+    return RAW_API_BASE_URL.replace(/\/+$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return '';
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export class ApiError extends Error {
   constructor(message, status, code) {
@@ -21,7 +35,7 @@ async function request(path, options = {}) {
     authHeaders['X-Admin-Token'] = adminToken;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     headers: {
       'Content-Type': 'application/json',
       ...authHeaders,
@@ -47,11 +61,13 @@ function getAdminToken(adminToken) {
 }
 
 export function buildApiUrl(path) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
   if (!path.startsWith('/')) {
-    return `${API_BASE_URL}/${path}`;
+    return `${API_BASE_URL || ''}${normalizedPath}`;
   }
 
-  return `${API_BASE_URL}${path}`;
+  return `${API_BASE_URL || ''}${normalizedPath}`;
 }
 
 export function createTeam(payload) {
@@ -195,7 +211,7 @@ export function deleteSubmission(competitionId, submissionId, adminToken = undef
 }
 
 export async function checkServerHealth() {
-  const response = await fetch(`${API_BASE_URL}/health`);
+  const response = await fetch(buildApiUrl('/health'));
   if (!response.ok) {
     throw new ApiError('Server is unavailable.', response.status, 'SERVER_UNAVAILABLE');
   }

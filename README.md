@@ -58,7 +58,7 @@ python -m pip install -r backend/requirements.txt
 
 - `DATABASE_PATH`：SQLite 数据库路径，默认 `backend/data/app.db`
 - `CORS_ORIGINS`：允许的前端来源，默认 `http://localhost:5173,http://127.0.0.1:5173`
-- `ADMIN_UI_BASE_URL`：管理员入口地址，默认 `http://localhost:5173`
+- `ADMIN_UI_BASE_URL`：管理员入口地址，建议设置成你对外访问的前端域名
 - `ADMIN_TOKEN`：可选的固定管理员 token；不设置时后端启动时会自动生成
 - `TEAM_ANNOTATION_GOAL`：队伍标注目标数，默认 `50`
 - `TEAM_MEMBER_LIMIT`：队伍人数上限，默认 `5`
@@ -66,7 +66,7 @@ python -m pip install -r backend/requirements.txt
 - `SUBMISSION_CHALLENGE_TTL_MINUTES`：提交挑战有效期，默认 `10`
 - `SUBMISSION_COOLDOWN_MINUTES`：提交冷却时间，默认 `5`
 - `SUBMISSION_TEAM_MAX_ATTEMPTS`：队伍提交次数上限，默认 `10`
-- `VITE_API_BASE_URL`：前端请求后端的地址，默认 `http://localhost:8000`
+- `VITE_API_BASE_URL`：前端请求后端的地址；不设置时默认使用当前站点同源地址，适合 nginx 反代或前后端同域部署
 
 ### 3. 启动后端
 
@@ -92,6 +92,36 @@ Vite 默认会启动在 `http://localhost:5173`。
 
 - 普通参赛入口：`http://localhost:5173/#begin`
 - 管理员入口：后端启动日志里会打印带 `admin_token` 的链接，打开后进入 `#adminneo`
+
+## 部署建议
+
+如果你准备把项目部署到云服务器，最省心的方式是：
+
+1. 前端构建后由 nginx 静态托管
+2. 后端 FastAPI 通过 nginx 反代到 `/api` 和 `/health`
+3. 前端不设置 `VITE_API_BASE_URL`，让它默认走当前站点同源地址
+4. 后端把 `CORS_ORIGINS` 和 `ADMIN_UI_BASE_URL` 改成你的公网前端地址
+
+这样前端代码里就不会出现硬编码的 `localhost`，也更适合单域名部署。
+
+### 一键启动脚本
+
+如果你想一次拉起前后端，可以直接用下面两个脚本：
+
+```bash
+bash ./scripts/start-linux.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ./scripts/start-windows.ps1
+```
+
+也可以直接用 `npm`：
+
+```bash
+npm run start:linux
+npm run start:windows
+```
 
 ## 常用脚本
 
@@ -132,4 +162,3 @@ npm run test:stage3:soak
 
 - 前端通过 hash 路由切换页面，核心页面包括 `begin`、`dashboard`、`annotation`、`modeling`、`training`、`submission` 和 `adminneo`
 - 项目中的 `backend/main.py` 只是一个方便的入口，真正的 FastAPI 应用定义在 `backend/app/main.py`
-
