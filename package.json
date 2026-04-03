@@ -8,15 +8,24 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test:backend": "python -m unittest discover -s backend/tests -v",
+    "test:frontend": "vitest run",
+    "test:stage2": "npm run test:backend && npm run test:frontend",
+    "test:stage3:soak:quick": "python -m backend.tests.stage3_soak --duration-seconds 60 --users 30",
+    "test:stage3:soak": "python -m backend.tests.stage3_soak --duration-seconds 600 --users 50",
     "terminal:utf8": "powershell -ExecutionPolicy Bypass -File ./scripts/enable-utf8.ps1",
     "test:team1-grid": "node scripts/searchTeam1Hyperparams.mjs",
     "test:mixed-mnist": "node scripts/testMixedMnistTraining.mjs"
   },
   "keywords": [],
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^27.0.0",
     "pngjs": "^7.0.0",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "vitest": "^4.0.0"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
