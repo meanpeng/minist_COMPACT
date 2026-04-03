@@ -47,6 +47,7 @@ def _ensure_default_competition(connection: sqlite3.Connection) -> None:
 def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
     columns = _table_columns(connection, "competition_settings")
     if "competition_id" in columns:
+        _ensure_column(connection, "competition_settings", "team_member_limit", "INTEGER NOT NULL DEFAULT 5")
         return
 
     legacy_rows = []
@@ -68,6 +69,7 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
             end_time TEXT,
             manual_status TEXT,
             annotation_goal INTEGER NOT NULL,
+            team_member_limit INTEGER NOT NULL,
             submission_limit INTEGER NOT NULL,
             submission_cooldown_minutes INTEGER NOT NULL,
             allow_submission INTEGER NOT NULL,
@@ -90,13 +92,14 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 end_time,
                 manual_status,
                 annotation_goal,
+                team_member_limit,
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 DEFAULT_COMPETITION_ID,
@@ -105,6 +108,7 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 row["end_time"],
                 row["manual_status"],
                 row["annotation_goal"],
+                row["team_member_limit"] if "team_member_limit" in row.keys() else settings.team_member_limit,
                 row["submission_limit"],
                 row["submission_cooldown_minutes"],
                 row["allow_submission"],
@@ -123,19 +127,21 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 end_time,
                 manual_status,
                 annotation_goal,
+                team_member_limit,
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT(competition_id) DO NOTHING
             """,
             (
                 DEFAULT_COMPETITION_ID,
                 "MNIST Classroom Challenge",
                 settings.team_annotation_goal,
+                settings.team_member_limit,
                 settings.submission_team_max_attempts,
                 settings.submission_cooldown_minutes,
                 now,
@@ -438,6 +444,7 @@ def init_db() -> None:
                 end_time TEXT,
                 manual_status TEXT,
                 annotation_goal INTEGER NOT NULL,
+                team_member_limit INTEGER NOT NULL,
                 submission_limit INTEGER NOT NULL,
                 submission_cooldown_minutes INTEGER NOT NULL,
                 allow_submission INTEGER NOT NULL,
@@ -468,19 +475,21 @@ def init_db() -> None:
                 end_time,
                 manual_status,
                 annotation_goal,
+                team_member_limit,
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT(competition_id) DO NOTHING
             """,
             (
                 DEFAULT_COMPETITION_ID,
                 "MNIST Classroom Challenge",
                 settings.team_annotation_goal,
+                settings.team_member_limit,
                 settings.submission_team_max_attempts,
                 settings.submission_cooldown_minutes,
                 now,

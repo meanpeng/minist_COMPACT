@@ -30,10 +30,10 @@ const AUGMENTATION_OPTIONS = [
   { value: 'affine', label: '仿射变换' },
 ];
 const AUGMENTATION_LABELS = {
-  shift: 'Shift',
-  scale: 'Scale',
-  rotation: 'Rotation',
-  affine: 'Affine',
+  shift: '平移',
+  scale: '缩放',
+  rotation: '旋转',
+  affine: '仿射',
 };
 const LOG_LIMIT = 8;
 
@@ -93,7 +93,7 @@ function createLogLine(message) {
 
 function formatAugmentationModes(modes) {
   if (!modes?.length) {
-    return 'None';
+    return '未开启';
   }
 
   return modes.map((mode) => AUGMENTATION_LABELS[mode] || mode).join(', ');
@@ -114,7 +114,7 @@ function getMetricValue(logs, primaryKey, fallbackKey) {
 async function loadImagePixels(imageUrl) {
   const response = await fetch(buildApiUrl(imageUrl));
   if (!response.ok) {
-    throw new Error('Failed to load an annotation image.');
+    throw new Error('图片下载失败。');
   }
 
   const blob = await response.blob();
@@ -124,7 +124,7 @@ async function loadImagePixels(imageUrl) {
   const context = canvas.getContext('2d', { willReadFrequently: true });
 
   if (!context) {
-    throw new Error('Canvas context is unavailable.');
+    throw new Error('无法创建图像上下文。');
   }
 
   context.clearRect(0, 0, IMAGE_SIZE, IMAGE_SIZE);
@@ -175,7 +175,7 @@ async function createDatasetTensors(samples) {
   });
 
   if (!usableSamples.length) {
-    throw new Error('No valid annotation images were available for training.');
+    throw new Error('没有可用于训练的样本。');
   }
 
   const featureBuffer = new Float32Array(samples.length * IMAGE_SIZE * IMAGE_SIZE);
@@ -359,7 +359,7 @@ function buildMetricsFromRun(run) {
 
 function buildLogFeed(run) {
   if (!run?.logs?.length) {
-    return [createLogLine('Awaiting training command. CPU backend will be enforced.')];
+    return [createLogLine('等待开始训练，后端固定使用 CPU 模式。')];
   }
 
   return run.logs
@@ -379,19 +379,20 @@ function TrainingPage({
   trainingUnlocked = false,
   isTrainingActive = false,
   onTrainingStateChange,
+  competitionTimer,
 }) {
   const [bootstrap, setBootstrap] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isTraining, setIsTraining] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [statusMessage, setStatusMessage] = useState('Preparing training workspace...');
+  const [statusMessage, setStatusMessage] = useState('正在同步训练环境...');
   const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
   const [epochs, setEpochs] = useState(DEFAULT_EPOCHS);
   const [learningRate, setLearningRate] = useState(DEFAULT_LEARNING_RATE);
   const [augmentCopies, setAugmentCopies] = useState(DEFAULT_AUGMENT_COPIES);
   const [augmentationModes, setAugmentationModes] = useState([]);
   const [metrics, setMetrics] = useState(createEmptyMetrics);
-  const [logFeed, setLogFeed] = useState(() => [createLogLine('Awaiting training command. CPU backend will be enforced.')]);
+  const [logFeed, setLogFeed] = useState(() => [createLogLine('等待训练启动，后端固定使用 CPU 模式。')]);
   const [progress, setProgress] = useState(EMPTY_PROGRESS);
   const trainingRef = useRef(false);
 
@@ -419,8 +420,8 @@ function TrainingPage({
           setLogFeed(buildLogFeed(response.latest_run));
           setStatusMessage(
             response.latest_run
-              ? 'Previous CPU training record loaded. Adjust params and retrain anytime.'
-              : 'Dataset loaded. CPU training is ready to start.',
+              ? '最近一次训练记录已同步，可以继续冲刺。'
+              : '训练环境已就绪，准备开启挑战。',
           );
           setBatchSize(response.latest_run?.batch_size || DEFAULT_BATCH_SIZE);
           setEpochs(response.latest_run?.epochs || DEFAULT_EPOCHS);
@@ -443,8 +444,8 @@ function TrainingPage({
           return;
         }
 
-        setErrorMessage(error instanceof ApiError ? error.message : 'Training resources failed to load.');
-        setStatusMessage('Training workspace could not be prepared.');
+        setErrorMessage(error instanceof ApiError ? error.message : '训练数据加载失败。');
+        setStatusMessage('训练环境加载失败。');
       } finally {
         if (isActive) {
           setIsLoading(false);
@@ -475,8 +476,7 @@ function TrainingPage({
     sampleCount > 0 &&
     Boolean(modelConfig);
   const progressSegments = useMemo(
-    () =>
-      Array.from({ length: Math.max(epochs, 1) }, (_, index) => index < progress.currentEpoch),
+    () => Array.from({ length: Math.max(epochs, 1) }, (_, index) => index < progress.currentEpoch),
     [epochs, progress.currentEpoch],
   );
 
@@ -504,25 +504,24 @@ function TrainingPage({
     setIsTraining(true);
     setErrorMessage('');
     setMetrics(createEmptyMetrics());
-    setLogFeed([createLogLine('Booting TensorFlow.js runtime...')]);
+    setLogFeed([createLogLine('正在初始化 TensorFlow.js 环境...')]);
     setProgress({
       currentEpoch: 0,
       totalEpochs: epochs,
       percent: 0,
       status: 'RUNNING',
     });
-    setStatusMessage('Initializing tf.js on CPU backend...');
+    setStatusMessage('准备本地训练任务...');
 
     try {
       await ensureCpuBackend();
-      setLogFeed((current) => [...current, createLogLine(`Backend locked to ${tf.getBackend().toUpperCase()}.`)]);
-      setStatusMessage('Loading team annotations into memory...');
+      setLogFeed((current) => [...current, createLogLine(`训练后端已切换到 ${tf.getBackend().toUpperCase()}.`)]);
+      setStatusMessage('正在准备训练数据...');
 
       const shuffledSamples = [...bootstrap.samples];
       tf.util.shuffle(shuffledSamples);
-      const trainingSamples = shuffledSamples;
 
-      const dataset = await createDatasetTensors(trainingSamples);
+      const dataset = await createDatasetTensors(shuffledSamples);
       ({ xs, ys } = dataset);
       const trainingDataset = buildAugmentedDataset(xs, ys, augmentationModes, augmentCopies);
       trainingXs = trainingDataset.xs;
@@ -530,7 +529,7 @@ function TrainingPage({
       setLogFeed((current) => [
         ...current.slice(-(LOG_LIMIT - 1)),
         createLogLine(
-          `${dataset.usableSampleCount} samples loaded.${dataset.skippedSampleCount ? ` Skipped ${dataset.skippedSampleCount} missing files.` : ''} 增强: ${augmentationSummary}。Effective train set: ${trainingDataset.effectiveSampleCount}. Building model graph...`,
+          `${dataset.usableSampleCount} 条样本已载入${dataset.skippedSampleCount ? `，跳过 ${dataset.skippedSampleCount} 条异常样本` : ''}。增强: ${augmentationSummary}，有效训练集 ${trainingDataset.effectiveSampleCount} 条。`,
         ),
       ]);
 
@@ -538,7 +537,7 @@ function TrainingPage({
       const epochLogs = [];
       const validationSplit = dataset.usableSampleCount >= 10 ? 0.2 : 0;
 
-      setStatusMessage('CPU training in progress...');
+      setStatusMessage('模型正在训练中...');
 
       await model.fit(trainingXs, trainingYs, {
         batchSize,
@@ -611,7 +610,7 @@ function TrainingPage({
       await model.save(getStoredModelKey(bootstrap.user_id));
 
       setBootstrap((current) => (current ? { ...current, latest_run: savedRun } : current));
-      setStatusMessage('Training finished. Metrics and model weights have been saved.');
+      setStatusMessage('训练完成，模型与日志已保存。');
       setProgress({
         currentEpoch: epochs,
         totalEpochs: epochs,
@@ -621,22 +620,20 @@ function TrainingPage({
       setLogFeed((current) => [
         ...current.slice(-(LOG_LIMIT - 1)),
         createLogLine(
-          `Training complete on ${dataset.usableSampleCount} base samples (${augmentationSummary}, copies ${augmentationModes.length ? augmentCopies : 0}, effective ${trainingXs.shape[0]}) | final acc ${toDisplayPercent(savedRun.final_accuracy)}${
+          `训练结束 | 样本 ${dataset.usableSampleCount} | 增强 ${augmentationSummary} | 最终 acc ${toDisplayPercent(savedRun.final_accuracy)}${
             typeof savedRun.final_val_accuracy === 'number'
-              ? ` | final val ${toDisplayPercent(savedRun.final_val_accuracy)}`
+              ? ` | val ${toDisplayPercent(savedRun.final_val_accuracy)}`
               : ''
           }`,
         ),
       ]);
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : error.message || 'Training failed.');
-      setStatusMessage('Training aborted. Check the error banner and try again.');
+      setErrorMessage(error instanceof ApiError ? error.message : error.message || '训练失败。');
+      setStatusMessage('训练中断，请检查记录后重试。');
       setProgress((current) => ({ ...current, status: 'ERROR' }));
       setLogFeed((current) => [
         ...current.slice(-(LOG_LIMIT - 1)),
-        createLogLine(
-          error instanceof ApiError ? error.message : error.message || 'An unexpected training error occurred.',
-        ),
+        createLogLine(error instanceof ApiError ? error.message : error.message || '训练过程发生错误。'),
       ]);
     } finally {
       xs?.dispose();
@@ -656,6 +653,7 @@ function TrainingPage({
     <AppChrome
       activeSection="training"
       session={session}
+      competitionTimer={competitionTimer}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
       isTrainingActive={isTrainingActive}
@@ -668,7 +666,7 @@ function TrainingPage({
         <div className="training-shell">
           <header className="training-header">
             <h1>
-              TFJS Training <span>CPU_ONLY</span>
+              本地训练 <span>LIVE_CPU</span>
             </h1>
             <div className="training-header-tags">
               <span>{`STATUS: ${progress.status}`}</span>
@@ -681,16 +679,16 @@ function TrainingPage({
           <div className="training-grid">
             <section className="training-controls">
               <div className="training-card training-card-params">
-                <div className="training-card-code">Train_Module</div>
+                <div className="training-card-code">TRAIN MODE</div>
                 <h2>
                   <span className="material-symbols-outlined">settings_input_component</span>
-                  HYPERPARAMETERS
+                  超参数
                 </h2>
 
                 <div className="training-form">
                   <div className="training-param-grid">
                     <label>
-                      <span>Batch Size</span>
+                      <span>batch size</span>
                       <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))} disabled={isTraining}>
                         {BATCH_SIZE_OPTIONS.map((option) => (
                           <option key={option} value={option}>
@@ -701,7 +699,7 @@ function TrainingPage({
                     </label>
 
                     <label>
-                      <span>Epochs</span>
+                      <span>epochs</span>
                       <select value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={isTraining}>
                         {EPOCH_OPTIONS.map((option) => (
                           <option key={option} value={option}>
@@ -712,7 +710,7 @@ function TrainingPage({
                     </label>
 
                     <label>
-                      <span>Learning Rate</span>
+                      <span>learning rate</span>
                       <select
                         value={learningRate}
                         onChange={(event) => setLearningRate(Number(event.target.value))}
@@ -727,7 +725,7 @@ function TrainingPage({
                     </label>
 
                     <label>
-                      <span>Aug Copies</span>
+                      <span>AUG COPIES</span>
                       <select
                         value={augmentCopies}
                         onChange={(event) => setAugmentCopies(Number(event.target.value))}
@@ -743,7 +741,7 @@ function TrainingPage({
                   </div>
 
                   <div className="training-multiselect">
-                    <span className="training-multiselect-title">Data Augmentation</span>
+                    <span className="training-multiselect-title">数据增强</span>
                     <div className="training-augmentation-list">
                       {AUGMENTATION_OPTIONS.map((option) => {
                         const checked = augmentationModes.includes(option.value);
@@ -770,41 +768,41 @@ function TrainingPage({
                         );
                       })}
                     </div>
-                    <div className="training-selection-summary">{`Selected: ${augmentationSummary}`}</div>
+                    <div className="training-selection-summary">{`当前：${augmentationSummary}`}</div>
                   </div>
 
                   <button type="button" className="training-start-button" onClick={handleStartTraining} disabled={!canTrain}>
-                    {isTraining ? 'TRAINING...' : 'START TRAINING'}
+                    {isTraining ? '训练中...' : '开始冲刺'}
                   </button>
                 </div>
               </div>
 
               <div className="gpu-card">
                 <div className="gpu-head">
-                  <span>Execution Backend</span>
+                  <span>运行环境</span>
                   <strong>CPU</strong>
                 </div>
                 <div className="gpu-meter">
                   <div className="gpu-meter-fill gpu-meter-fill-cpu" />
                 </div>
-                <p className="gpu-footnote">TensorFlow.js is forced onto CPU to match the training requirement.</p>
+                <p className="gpu-footnote">当前使用 TensorFlow.js 浏览器端 CPU 后端。</p>
               </div>
 
               <div className="training-card dataset-card">
                 <div className="dataset-item">
-                  <span>Dataset</span>
+                  <span>样本数</span>
                   <strong>{sampleCount.toLocaleString()}</strong>
                 </div>
                 <div className="dataset-item">
-                  <span>Hidden Layers</span>
+                  <span>隐藏层</span>
                   <strong>{modelConfig?.summary?.hidden_layer_count ?? 0}</strong>
                 </div>
                 <div className="dataset-item">
-                  <span>Memory</span>
+                  <span>内存预估</span>
                   <strong>{modelConfig?.summary?.estimated_memory_mb ?? '--'} MB</strong>
                 </div>
                 <div className="dataset-item">
-                  <span>Last Augment</span>
+                  <span>最近增强</span>
                   <strong>{lastRunAugmentationSummary}</strong>
                 </div>
               </div>
@@ -814,10 +812,9 @@ function TrainingPage({
               <article className="training-card chart-card">
                 <div className="chart-head">
                   <h3>
-                    <span className="material-symbols-outlined">trending_down</span>
-                    LOSS_CURVE
+                    Loss
                   </h3>
-                  <span>{`Current: ${toDisplayMetric(currentLoss)}`}</span>
+                  <span>{`当前：${toDisplayMetric(currentLoss)}`}</span>
                 </div>
                 <div className="loss-chart">
                   <div className="loss-grid" aria-hidden="true">
@@ -830,7 +827,7 @@ function TrainingPage({
                       <polyline points={toChartPoints(metrics.loss)} />
                     </svg>
                   ) : (
-                    <div className="chart-empty">No loss curve yet</div>
+                    <div className="chart-empty">等待 loss 数据</div>
                   )}
                 </div>
               </article>
@@ -838,10 +835,9 @@ function TrainingPage({
               <article className="training-card chart-card">
                 <div className="chart-head">
                   <h3 className="chart-title-primary">
-                    <span className="material-symbols-outlined">show_chart</span>
-                    ACCURACY_VAL
+                    Accuracy
                   </h3>
-                  <span className="chart-target">{`Current: ${toDisplayPercent(currentValAccuracy ?? currentAccuracy)}`}</span>
+                  <span className="chart-target">{`当前：${toDisplayPercent(currentValAccuracy ?? currentAccuracy)}`}</span>
                 </div>
 
                 <div className="accuracy-chart">
@@ -851,25 +847,25 @@ function TrainingPage({
                       <polyline points={toChartPoints(metrics.valAccuracy.length ? metrics.valAccuracy : metrics.accuracy)} />
                     </svg>
                   ) : (
-                    <div className="chart-empty">No accuracy curve yet</div>
+                    <div className="chart-empty">等待训练结果</div>
                   )}
                 </div>
 
                 <div className="metric-grid">
                   <div className="metric-tile">
-                    <span>Train Accuracy</span>
+                    <span>训练 Acc</span>
                     <strong>{toDisplayPercent(currentAccuracy)}</strong>
                   </div>
                   <div className="metric-tile">
-                    <span>Val Accuracy</span>
+                    <span>验证 Acc</span>
                     <strong>{toDisplayPercent(currentValAccuracy)}</strong>
                   </div>
                   <div className="metric-tile">
-                    <span>Val Loss</span>
+                    <span>验证 Loss</span>
                     <strong>{toDisplayMetric(currentValLoss)}</strong>
                   </div>
                   <div className="metric-tile">
-                    <span>Last Run</span>
+                    <span>最近更新</span>
                     <strong>{lastRun?.updated_at ? new Date(lastRun.updated_at).toLocaleTimeString() : '--'}</strong>
                   </div>
                 </div>
@@ -879,13 +875,13 @@ function TrainingPage({
                 <div className="progress-headline">
                   <div>
                     <div className="progress-title">
-                      {`EPOCH_${String(progress.currentEpoch).padStart(2, '0')}`} <span>{`/ ${progress.totalEpochs || epochs}`}</span>
+                      {`ROUND_${String(progress.currentEpoch).padStart(2, '0')}`} <span>{`/ ${progress.totalEpochs || epochs}`}</span>
                     </div>
                     <div className="progress-subtitle">{statusMessage}</div>
                   </div>
                   <div className="progress-summary">
                     <strong>{`${progress.percent}%`}</strong>
-                    <span>{`RUN MODE: ${isTraining ? 'LIVE_CPU' : 'STANDBY'}`}</span>
+                    <span>{`模式：${isTraining ? 'LIVE_CPU' : 'STANDBY'}`}</span>
                   </div>
                 </div>
 
@@ -904,12 +900,12 @@ function TrainingPage({
                 {errorMessage ? <div className="training-banner training-banner-error">{errorMessage}</div> : null}
                 {!errorMessage && !trainingUnlocked ? (
                   <div className="training-banner training-banner-warning">
-                    Annotation goal is not unlocked yet, so this page stays read-only.
+                    标注数量未达标，暂时不能开始训练。
                   </div>
                 ) : null}
                 {!errorMessage && sampleCount === 0 ? (
                   <div className="training-banner training-banner-warning">
-                    Your team dataset is empty. Go back to annotation and upload handwritten digits first.
+                    当前没有可训练样本，请先去标注页提交数据。
                   </div>
                 ) : null}
 

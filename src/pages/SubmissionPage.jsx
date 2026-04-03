@@ -51,14 +51,20 @@ function formatRemainingAttempts(remaining, limit) {
   return `${remaining}/${limit}`;
 }
 
-function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, isTrainingActive = false }) {
+function SubmissionPage({
+  session,
+  onResetExperiment,
+  trainingUnlocked = false,
+  isTrainingActive = false,
+  competitionTimer,
+}) {
   const [bootstrap, setBootstrap] = useState(null);
   const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [statusMessage, setStatusMessage] = useState('Preparing validation challenge...');
-  const [logLines, setLogLines] = useState(() => [createLogLine('Submit page waiting for a trained local model.')]);
+  const [statusMessage, setStatusMessage] = useState('正在准备最终挑战...');
+  const [logLines, setLogLines] = useState(() => [createLogLine('提交面板正在等待本地训练好的模型。')]);
 
   useEffect(() => {
     let isActive = true;
@@ -82,16 +88,16 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
           setBootstrap(response);
           setResult(null);
           if (response.submission_available) {
-            setStatusMessage('Validation images are ready. Run local inference when you are ready.');
+            setStatusMessage('挑战样本已就绪，随时可以开始本地推理。');
             setLogLines([
-              createLogLine(`Challenge ${response.submission_id.slice(0, 8)} prepared with ${response.sample_count} MNIST samples.`),
-              createLogLine('Only prediction labels will be sent back to the backend.'),
+              createLogLine(`Challenge ${response.submission_id.slice(0, 8)} 已生成，共 ${response.sample_count} 张 MNIST 样本。`),
+              createLogLine('提交时只会上传预测标签，模型仍保留在本地。'),
             ]);
           } else {
-            setStatusMessage(response.submission_block_reason || 'Submission is temporarily unavailable.');
+            setStatusMessage(response.submission_block_reason || '当前暂时无法提交。');
             setLogLines([
-              createLogLine('Submit page data loaded successfully.'),
-              createLogLine(response.submission_block_reason || 'Submission is temporarily unavailable.'),
+              createLogLine('提交面板数据已载入。'),
+              createLogLine(response.submission_block_reason || '当前暂时无法提交。'),
             ]);
           }
         });
@@ -100,8 +106,8 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
           return;
         }
 
-        setErrorMessage(error instanceof ApiError ? error.message : 'Submission resources failed to load.');
-        setStatusMessage('Validation challenge could not be prepared.');
+        setErrorMessage(error instanceof ApiError ? error.message : '提交资源加载失败。');
+        setStatusMessage('挑战任务准备失败。');
       } finally {
         if (isActive) {
           setIsLoading(false);
@@ -127,9 +133,10 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
     () => findCurrentTeamEntry(leaderboard, session?.team?.id),
     [leaderboard, session?.team?.id],
   );
+  const currentTestAccuracy = result?.accuracy ?? null;
 
   const modelSummary = [
-    ['LATEST_VAL_ACC', toDisplayPercent(result?.accuracy ?? lastRun?.final_val_accuracy ?? lastRun?.final_accuracy), 'primary'],
+    ['LATEST_VAL_ACC', toDisplayPercent(lastRun?.final_val_accuracy ?? lastRun?.final_accuracy), 'primary'],
     ['CORRECT / TOTAL', result ? `${result.correct_count}/${result.sample_count}` : `${bootstrap?.sample_count || '--'} SAMPLES`, 'error'],
     [
       'TOTAL_PARAMS',
@@ -151,8 +158,8 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
 
     setIsSubmitting(true);
     setErrorMessage('');
-    setStatusMessage('Loading locally trained model from IndexedDB...');
-    setLogLines((current) => [...current.slice(-5), createLogLine('Locked inference backend to CPU.')]);
+    setStatusMessage('正在从 IndexedDB 读取本地模型...');
+    setLogLines((current) => [...current.slice(-5), createLogLine('Inference backend 已锁定为 CPU。')]);
 
     try {
       await ensureCpuBackend();
@@ -160,11 +167,11 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
       try {
         model = await tf.loadLayersModel(getStoredModelKey(bootstrap.user_id));
       } catch {
-        throw new Error('No trained model was found in this browser. Please finish training once before submitting.');
+        throw new Error('当前浏览器里没有训练好的模型，请先完成至少一次训练。');
       }
 
-      setStatusMessage('Running local inference on the sampled MNIST validation set...');
-      setLogLines((current) => [...current.slice(-5), createLogLine('Model weights loaded from local browser storage.')]);
+      setStatusMessage('正在对抽取的 MNIST 样本执行本地推理...');
+      setLogLines((current) => [...current.slice(-5), createLogLine('模型权重已从本地浏览器存储载入。')]);
 
       const flatPixels = decodeChallengeImages(bootstrap.challenge_images);
       xs = tf.tensor4d(flatPixels, [bootstrap.sample_count, 28, 28, 1]);
@@ -172,10 +179,10 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
       predictionsTensor = logits.argMax(-1);
       const predictions = Array.from(await predictionsTensor.data());
 
-      setStatusMessage('Submitting prediction labels to backend for scoring...');
+      setStatusMessage('正在把预测结果送去评分...');
       setLogLines((current) => [
         ...current.slice(-5),
-        createLogLine(`Inference complete. Uploading ${predictions.length} predicted labels only.`),
+        createLogLine(`推理完成，正在上传 ${predictions.length} 个预测标签。`),
       ]);
 
       const evaluation = await evaluateSubmission({
@@ -185,18 +192,18 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
       }, session?.session_token);
 
       setResult(evaluation);
-      setStatusMessage('Backend scoring complete. Accuracy has been returned to the submit page.');
+      setStatusMessage('评分完成，结果已返回。');
       setLogLines((current) => [
         ...current.slice(-5),
-        createLogLine(`Scored ${evaluation.correct_count}/${evaluation.sample_count} correctly.`),
-        createLogLine(`Current team rank is #${evaluation.rank}.`),
+        createLogLine(`命中 ${evaluation.correct_count}/${evaluation.sample_count}。`),
+        createLogLine(`当前队伍排名 #${evaluation.rank}。`),
       ]);
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : error.message || 'Submission failed.');
-      setStatusMessage('Submission failed. Review the log and try again.');
+      setErrorMessage(error instanceof ApiError ? error.message : error.message || '提交失败。');
+      setStatusMessage('提交失败，请检查记录后重试。');
       setLogLines((current) => [
         ...current.slice(-5),
-        createLogLine(error instanceof ApiError ? error.message : error.message || 'Submission error.'),
+        createLogLine(error instanceof ApiError ? error.message : error.message || '提交出错。'),
       ]);
     } finally {
       xs?.dispose();
@@ -211,6 +218,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
     <AppChrome
       activeSection="submission"
       session={session}
+      competitionTimer={competitionTimer}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
       isTrainingActive={isTrainingActive}
@@ -222,7 +230,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
               <div className="summary-icon" aria-hidden="true">
                 <span className="material-symbols-outlined">inventory_2</span>
               </div>
-              <h2>Model Summary</h2>
+              <h2>提交前检查</h2>
 
               <div className="summary-list">
                 {modelSummary.map(([label, value, accent]) => (
@@ -234,7 +242,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
               </div>
 
               <div className="summary-footer">
-                <span>LAST_SUBMIT</span>
+                <span>最近提交</span>
                 <strong>{formatTime(latestResult?.created_at || lastRun?.updated_at)}</strong>
               </div>
             </div>
@@ -242,7 +250,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
             <div className="submission-card log-card">
               <div className="log-title">
                 <span className="material-symbols-outlined">info</span>
-                <h3>System Log</h3>
+                <h3>运行记录</h3>
               </div>
               <div className="log-list">
                 {logLines.map((entry) => (
@@ -257,7 +265,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
           <section className="submission-column submission-column-center">
             <div className="mission-copy">
               <h1>
-                Validation <span>Submit</span>
+                FINAL <span>SUBMIT</span>
               </h1>
               <p>{statusMessage}</p>
             </div>
@@ -277,7 +285,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
                 >
                   {isSubmitting ? 'hourglass_top' : 'send'}
                 </span>
-                <strong>{isSubmitting ? 'SCORING...' : 'SUBMIT RESULTS'}</strong>
+                <strong>{isSubmitting ? '评分中...' : '提交结果'}</strong>
               </button>
             </div>
 
@@ -287,17 +295,17 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
                   <span className="material-symbols-outlined">{result ? 'verified' : 'inventory_2'}</span>
                 </div>
                 <div>
-                  <p>{result ? 'Scored!' : 'Ready'}</p>
+                  <p>{result ? '本次挑战已评分' : 'READY'}</p>
                   <span>
                     {result
-                      ? `Backend returned ${toDisplayPercent(result.accuracy)} on ${result.sample_count} hidden-label samples`
-                      : `${bootstrap?.sample_count || 0} random MNIST validation images are loaded for local inference`}
+                      ? `本次成绩 ${toDisplayPercent(result.accuracy)}，共 ${result.sample_count} 个隐藏标签样本。`
+                      : `已加载 ${bootstrap?.sample_count || 0} 张随机 MNIST 样本，等待本地推理。`}
                   </span>
                 </div>
               </div>
               <div className="success-rank">
-                <strong>{`#${result?.rank || (currentTeamEntry ? leaderboard.indexOf(currentTeamEntry) + 1 : '--')}`}</strong>
-                <span>TEAM RANK</span>
+                <strong>{result ? `#${result.rank}` : `#${currentTeamEntry ? leaderboard.indexOf(currentTeamEntry) + 1 : '--'}`}</strong>
+                <span>队伍排名</span>
               </div>
             </div>
 
@@ -309,15 +317,20 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
             ) : null}
             {!errorMessage && !trainingUnlocked ? (
               <div className="submission-banner submission-banner-warning">
-                Annotation goal is not unlocked yet, so submissions stay disabled.
+                标注目标尚未达成，FINAL SUBMIT 暂未开放。
               </div>
             ) : null}
           </section>
 
           <section className="submission-column submission-column-right">
+            <div className={`submission-result-panel ${result ? 'submission-result-panel-ready' : ''}`} aria-live="polite">
+              <div className="submission-result-label">本次挑战精度</div>
+              <div className="submission-result-score">{toDisplayPercent(currentTestAccuracy)}</div>
+            </div>
+
             <div className="submission-card leaderboard-card">
               <div className="leaderboard-card-head">
-                <h2>Leaderboard</h2>
+                <h2>赛事榜</h2>
                 <span>{`TOP_${leaderboard.length || 0}`}</span>
               </div>
 
@@ -339,7 +352,7 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
                     );
                   })
                 ) : (
-                  <div className="leaderboard-empty">No scored teams yet</div>
+                  <div className="leaderboard-empty">还没有队伍上榜</div>
                 )}
               </div>
 
@@ -356,8 +369,8 @@ function SubmissionPage({ session, onResetExperiment, trainingUnlocked = false, 
             <div className="submission-card achievement-card">
               <div className="achievement-copy">
                 <span className="material-symbols-outlined">military_tech</span>
-                <h4>Validation Rules</h4>
-                <p>Frontend only performs inference. Backend keeps the hidden labels and computes final accuracy after submission.</p>
+                <h4>提交说明</h4>
+                <p>前端只负责本地推理，隐藏标签保存在后端，最终成绩由后端统一评分。</p>
               </div>
               <div className="achievement-mark" aria-hidden="true">
                 <span

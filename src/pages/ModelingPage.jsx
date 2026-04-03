@@ -228,7 +228,13 @@ function buildCanvasNodes(hiddenLayers) {
   return nodes;
 }
 
-function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, isTrainingActive = false }) {
+function ModelingPage({
+  session,
+  onResetExperiment,
+  trainingUnlocked = false,
+  isTrainingActive = false,
+  competitionTimer,
+}) {
   const [hiddenLayers, setHiddenLayers] = useState([]);
   const [savedHiddenLayers, setSavedHiddenLayers] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState('fixed-input');
@@ -265,7 +271,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
           return;
         }
 
-        setErrorMessage(error instanceof ApiError ? error.message : 'Model config failed to load.');
+        setErrorMessage(error instanceof ApiError ? error.message : '模型配置加载失败。');
       } finally {
         if (isActive) {
           setIsLoading(false);
@@ -357,9 +363,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
     }
 
     if (summary.exceeds_limit) {
-      setErrorMessage(
-        `Current config has about ${summary.param_count.toLocaleString()} params, above the ${MAX_PARAM_COUNT.toLocaleString()} limit.`,
-      );
+      setErrorMessage(`当前配置约有 ${summary.param_count.toLocaleString()} 个参数，超过 ${MAX_PARAM_COUNT.toLocaleString()} 上限。`);
       return;
     }
 
@@ -375,9 +379,9 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
       setHiddenLayers(response.hidden_layers || []);
       setSavedHiddenLayers(response.hidden_layers || []);
       setServerMeta({ updated_at: response.updated_at });
-      setSaveMessage('Model structure saved.');
+      setSaveMessage('模型结构已保存。');
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Model save failed.');
+      setErrorMessage(error instanceof ApiError ? error.message : '模型保存失败。');
     } finally {
       setIsSaving(false);
     }
@@ -387,6 +391,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
     <AppChrome
       activeSection="modeling"
       session={session}
+      competitionTimer={competitionTimer}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
       isTrainingActive={isTrainingActive}
@@ -396,9 +401,9 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
           <div className="drawer-header">
             <h2>
               <span className="material-symbols-outlined">category</span>
-              MODULES
+              模型组件
             </h2>
-            <p>Fixed input/output, single-line hidden stack only</p>
+            <p>输入和输出已固定，你只需编辑中间层</p>
           </div>
 
           <div className="module-list">
@@ -417,7 +422,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
                   <div>{card.name}</div>
                   <span>
                     {card.type === 'conv2d' || card.type === 'maxpool'
-                      ? `${card.detail} · inserts before first Dense if needed`
+                      ? `${card.detail}，必要时会自动排到 Dense 前`
                       : card.detail}
                   </span>
                 </div>
@@ -427,20 +432,20 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
 
           <div className="module-rules">
             <div>
-              <strong>User Scope</strong>
-              <span>Each user now has an independent model config. It is no longer shared by the whole team.</span>
+              <strong>个人配置</strong>
+              <span>每人模型配置独立解锁，打造你的专属王牌模型！</span>
             </div>
             <div>
-              <strong>Fixed Structure</strong>
-              <span>Input is fixed at 28x28x1, output head is fixed as Dense(10) + Softmax.</span>
+              <strong>固定结构</strong>
+              <span>输入固定为 28x28x1，输出固定为 Dense(10) + Softmax。</span>
             </div>
             <div>
-              <strong>Auto Flatten</strong>
-              <span>Flatten is inserted automatically before the first Dense layer or before the output head.</span>
+              <strong>自动 Flatten</strong>
+              <span>系统会在首个 Dense 前，或输出层前自动插入 Flatten。</span>
             </div>
             <div>
-              <strong>Conv After Dense</strong>
-              <span>Adding Conv2D or MaxPooling after Dense will auto-place that layer before the first Dense.</span>
+              <strong>层序规则</strong>
+              <span>若在 Dense 后添加 Conv2D/MaxPooling，系统会自动挪到 Dense 前。</span>
             </div>
           </div>
         </section>
@@ -448,8 +453,8 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
         <section className="model-canvas">
           <div className="canvas-summary">
             <div>
-              <span>USER</span>
-              <strong>{session?.user?.username || 'Unknown User'}</strong>
+              <span>PLAYER</span>
+              <strong>{session?.user?.username || '未知用户'}</strong>
             </div>
             <div>
               <span>PARAMS</span>
@@ -463,7 +468,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
 
           <div className="model-stack">
             {isLoading ? (
-              <div className="canvas-empty-state">Loading model config...</div>
+              <div className="canvas-empty-state">正在加载模型配置...</div>
             ) : (
               canvasNodes.map((node, index) => (
                 <div key={node.id} className="model-stack-item">
@@ -503,8 +508,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
             {saveMessage ? <div className="status-banner status-banner-success">{saveMessage}</div> : null}
             {!errorMessage && !saveMessage ? (
               <div className="status-banner status-banner-muted">
-                Current model has {summary.hidden_layer_count} editable hidden layers. Param limit is{' '}
-                {MAX_PARAM_COUNT.toLocaleString()}.
+                当前模型有 {summary.hidden_layer_count} 个可编辑隐藏层，参数上限为 {MAX_PARAM_COUNT.toLocaleString()}。
               </div>
             ) : null}
           </div>
@@ -512,13 +516,13 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
 
         <section className="properties-panel">
           <div className="properties-header">
-            <h2>PROPERTIES</h2>
+            <h2>组件设置</h2>
             <span>
               {selectedCanvasNode?.locked
-                ? 'FIXED NODE'
+                ? '固定节点'
                 : selectedLayer
                   ? formatLayerId(hiddenLayers.findIndex((layer) => layer.id === selectedLayer.id))
-                  : 'NONE'}
+                  : '未选择'}
             </span>
           </div>
 
@@ -528,9 +532,9 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
                 <span className="material-symbols-outlined">{selectedCanvasNode?.icon || 'tune'}</span>
               </div>
               <div>
-                <div className="properties-title">{selectedCanvasNode?.name || 'No selection'}</div>
+                <div className="properties-title">{selectedCanvasNode?.name || '未选择节点'}</div>
                 <div className="properties-subtitle">
-                  {selectedCanvasNode?.locked ? 'Fixed structure, not editable' : 'Preset dropdowns only'}
+                  {selectedCanvasNode?.locked ? '固定结构，不可编辑' : '通过预设选项调整'}
                 </div>
               </div>
             </div>
@@ -662,52 +666,52 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
             ) : (
               <div className="fixed-node-note">
                 <p>{selectedCanvasNode?.detail}</p>
-                <p>Input, auto Flatten, and the output head are fixed by the system and cannot be edited or deleted.</p>
+                <p>输入层、自动 Flatten 和输出头由系统固定，不可编辑或删除。</p>
               </div>
             )}
 
             <div className={summary.exceeds_limit ? 'resource-card resource-card-warning' : 'resource-card'}>
               <div className="resource-title">
                 <span className="material-symbols-outlined">memory</span>
-                RESOURCE_ESTIMATE
+                模型规模预估
               </div>
               <div className="resource-list">
                 <div>
-                  <span>Hidden Layers</span>
+                  <span>隐藏层数</span>
                   <strong>{summary.hidden_layer_count}</strong>
                 </div>
                 <div>
-                  <span>Params</span>
+                  <span>参数量</span>
                   <strong>{summary.param_count.toLocaleString()}</strong>
                 </div>
                 <div>
-                  <span>Memory</span>
+                  <span>内存</span>
                   <strong>{summary.estimated_memory_mb} MB</strong>
                 </div>
                 <div>
-                  <span>Compute</span>
+                  <span>算力消耗</span>
                   <strong>{summary.estimated_compute}</strong>
                 </div>
                 <div>
                   <span>Flatten</span>
-                  <strong>{summary.flatten_position === 'before_output' ? 'Before output' : 'Before first dense'}</strong>
+                  <strong>{summary.flatten_position === 'before_output' ? '输出层前' : '首个 Dense 前'}</strong>
                 </div>
               </div>
-              {summary.exceeds_limit ? <p className="resource-warning">Param count exceeds the limit, so this config cannot be saved.</p> : null}
+              {summary.exceeds_limit ? <p className="resource-warning">参数量超出上限，当前配置无法保存。</p> : null}
             </div>
 
             <div className="save-meta">
-              <span>Last Saved</span>
-              <strong>{serverMeta.updated_at ? new Date(serverMeta.updated_at).toLocaleString() : 'Not saved yet'}</strong>
+              <span>上次保存</span>
+              <strong>{serverMeta.updated_at ? new Date(serverMeta.updated_at).toLocaleString() : '尚未保存'}</strong>
             </div>
           </div>
 
           <div className="properties-actions">
             <button type="button" className="action-button action-button-danger" onClick={handleDeleteLayer} disabled={!selectedLayer}>
-              Delete Layer
+              删除该层
             </button>
             <button type="button" className="action-button action-button-secondary" onClick={handleResetLayers} disabled={isLoading}>
-              Reset Stack
+              清空结构
             </button>
             <button
               type="button"
@@ -715,7 +719,7 @@ function ModelingPage({ session, onResetExperiment, trainingUnlocked = false, is
               onClick={handleSaveModel}
               disabled={isSaving || isLoading || summary.exceeds_limit || !hasUnsavedChanges}
             >
-              {isSaving ? 'Saving...' : 'Save Model'}
+              {isSaving ? '保存中...' : '保存模型'}
             </button>
           </div>
         </section>

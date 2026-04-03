@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import AdminPage from './pages/AdminPage';
 import AdminNeoPage from './pages/AdminNeoPage';
 import AnnotationPage from './pages/AnnotationPage';
 import BeginPage from './pages/BeginPage';
@@ -7,18 +6,22 @@ import DashboardPage from './pages/DashboardPage';
 import ModelingPage from './pages/ModelingPage';
 import SubmissionPage from './pages/SubmissionPage';
 import TrainingPage from './pages/TrainingPage';
+import { useCompetitionTimer } from './hooks/useCompetitionTimer';
 import { fetchAnnotationStats, fetchSession } from './lib/api';
 import {
   clearStoredAnnotationStats,
   clearStoredSession,
+  loadStoredAdminToken,
   loadStoredAnnotationStats,
   loadStoredSession,
   saveStoredAnnotationStats,
+  saveStoredAdminToken,
   saveStoredSession,
 } from './lib/session';
 
 const DEFAULT_ROUTE = 'begin';
-const VALID_ROUTES = new Set(['begin', 'dashboard', 'annotation', 'modeling', 'training', 'submission', 'admin', 'admin-v2']);
+const VALID_ROUTES = new Set(['begin', 'dashboard', 'annotation', 'modeling', 'training', 'submission', 'adminneo', 'admin-v2']);
+const SESSION_REFRESH_INTERVAL_MS = 5000;
 
 function areAnnotationStatsEqual(currentStats, nextStats) {
   if (!currentStats || !nextStats) {
@@ -41,14 +44,31 @@ function getRouteFromHash() {
   return VALID_ROUTES.has(route) ? route : DEFAULT_ROUTE;
 }
 
+function getAdminTokenFromSearch() {
+  const token = new URLSearchParams(window.location.search).get('admin_token');
+  return token ? token.trim() : '';
+}
+
 function App() {
   const [route, setRoute] = useState(() => getRouteFromHash());
   const [session, setSession] = useState(() => loadStoredSession());
   const [isBootstrapping, setIsBootstrapping] = useState(() => Boolean(loadStoredSession()?.session_token));
   const [annotationStats, setAnnotationStats] = useState(() => loadStoredAnnotationStats());
+  const [adminToken, setAdminToken] = useState(() => loadStoredAdminToken() || getAdminTokenFromSearch());
   const [isAnnotationStatsLoading, setIsAnnotationStatsLoading] = useState(false);
   const [inviteCodeNotice, setInviteCodeNotice] = useState(null);
   const [isTrainingActive, setIsTrainingActive] = useState(false);
+  const competitionTimer = useCompetitionTimer(session?.competition_status || null);
+
+  useEffect(() => {
+    const tokenFromUrl = getAdminTokenFromSearch();
+    if (!tokenFromUrl) {
+      return;
+    }
+
+    setAdminToken(tokenFromUrl);
+    saveStoredAdminToken(tokenFromUrl);
+  }, []);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -112,6 +132,37 @@ function App() {
 
   useEffect(() => {
     if (!session?.session_token) {
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const refreshSession = async () => {
+      try {
+        const freshSession = await fetchSession(session.session_token);
+        if (!isActive) {
+          return;
+        }
+
+        setSession(freshSession);
+        saveStoredSession(freshSession);
+      } catch {
+        // Keep the last known session so the app stays usable during transient API issues.
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      refreshSession();
+    }, SESSION_REFRESH_INTERVAL_MS);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+    };
+  }, [session?.session_token]);
+
+  useEffect(() => {
+    if (!session?.session_token) {
       setAnnotationStats(null);
       setIsAnnotationStatsLoading(false);
       clearStoredAnnotationStats();
@@ -159,10 +210,16 @@ function App() {
   }, [session?.session_token]);
 
   useEffect(() => {
-    if (!isBootstrapping && !session && route !== 'begin' && route !== 'admin' && route !== 'admin-v2') {
+    if (!isBootstrapping && !session && route !== 'begin' && route !== 'adminneo' && route !== 'admin-v2') {
       window.location.hash = 'begin';
     }
   }, [isBootstrapping, route, session]);
+
+  useEffect(() => {
+    if (!isBootstrapping && (route === 'adminneo' || route === 'admin-v2') && !adminToken) {
+      window.location.hash = 'begin';
+    }
+  }, [adminToken, isBootstrapping, route]);
 
   const isTrainingUnlocked =
     Boolean(annotationStats) && annotationStats.total_count >= annotationStats.goal;
@@ -172,6 +229,12 @@ function App() {
       window.location.hash = 'annotation';
     }
   }, [annotationStats, isBootstrapping, isTrainingUnlocked, route, session]);
+
+  useEffect(() => {
+    if (!isBootstrapping && !isTrainingActive && route === 'submission' && session && annotationStats && !isTrainingUnlocked) {
+      window.location.hash = 'annotation';
+    }
+  }, [annotationStats, isBootstrapping, isTrainingActive, isTrainingUnlocked, route, session]);
 
   useEffect(() => {
     if (isTrainingActive && route !== 'training') {
@@ -204,11 +267,7 @@ function App() {
     return <BeginPage onSessionReady={handleSessionReady} session={session} />;
   }
 
-  if (route === 'admin') {
-    return <AdminPage />;
-  }
-
-  if (route === 'admin-v2') {
+  if (route === 'adminneo' || route === 'admin-v2') {
     return <AdminNeoPage />;
   }
 
@@ -219,6 +278,7 @@ function App() {
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
         isTrainingActive={isTrainingActive}
+        competitionTimer={competitionTimer}
         stats={annotationStats}
         isStatsLoading={isAnnotationStatsLoading}
         onAnnotationStatsChange={(nextStats) => {
@@ -242,6 +302,7 @@ function App() {
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
         isTrainingActive={isTrainingActive}
+        competitionTimer={competitionTimer}
       />
     );
   }
@@ -253,6 +314,7 @@ function App() {
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
         isTrainingActive={isTrainingActive}
+        competitionTimer={competitionTimer}
         onTrainingStateChange={setIsTrainingActive}
       />
     );
@@ -265,6 +327,7 @@ function App() {
         onResetExperiment={handleResetExperiment}
         trainingUnlocked={isTrainingUnlocked}
         isTrainingActive={isTrainingActive}
+        competitionTimer={competitionTimer}
       />
     );
   }
@@ -277,6 +340,26 @@ function App() {
       isTrainingActive={isTrainingActive}
       inviteCodeNotice={inviteCodeNotice}
       onDismissInviteCodeNotice={() => setInviteCodeNotice(null)}
+      competitionTimer={competitionTimer}
+      onCompetitionChange={(nextCompetition) => {
+        if (!nextCompetition) {
+          return;
+        }
+
+        setSession((currentSession) => {
+          if (!currentSession) {
+            return currentSession;
+          }
+
+          const nextSession = {
+            ...currentSession,
+            competition_status: nextCompetition,
+          };
+
+          saveStoredSession(nextSession);
+          return nextSession;
+        });
+      }}
     />
   );
 }

@@ -20,23 +20,6 @@ function formatTimestamp(value) {
   return new Date(value).toLocaleString();
 }
 
-function formatDuration(totalSeconds) {
-  if (typeof totalSeconds !== 'number' || Number.isNaN(totalSeconds) || totalSeconds < 0) {
-    return '--';
-  }
-
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (days > 0) {
-    return `${days}D ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  }
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
 function getLeaderboardVisual(row) {
   if (row.is_current_team) {
     return { accent: 'primary', icon: 'radar' };
@@ -90,6 +73,8 @@ function DashboardPage({
   isTrainingActive = false,
   inviteCodeNotice = null,
   onDismissInviteCodeNotice,
+  onCompetitionChange,
+  competitionTimer,
 }) {
   const [dashboard, setDashboard] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -121,12 +106,13 @@ function DashboardPage({
 
         setDashboard(response);
         setErrorMessage('');
+        onCompetitionChange?.(response.competition || null);
       } catch (error) {
         if (!isActive) {
           return;
         }
 
-        setErrorMessage(error instanceof ApiError ? error.message : 'Dashboard data failed to load.');
+        setErrorMessage(error instanceof ApiError ? error.message : '总览数据加载失败。');
       } finally {
         if (isActive && !silent) {
           setIsLoading(false);
@@ -165,32 +151,8 @@ function DashboardPage({
   const leaderboard = dashboard?.leaderboard || [];
   const teamMembers = dashboard?.team_members || [];
   const inviteCode = dashboard?.session?.team?.invite_code || session?.team?.invite_code || '';
-  const competitionName = competition?.competition_name || dashboard?.session?.competition?.name || 'COMPETITION_SYNCING';
-  const competitionTimer = (() => {
-    if (!competition) {
-      return { label: 'STATUS', value: '--' };
-    }
-
-    if (competition.effective_status === 'not_started') {
-      return {
-        label: 'STARTS IN',
-        value: competition.seconds_until_start != null ? formatDuration(competition.seconds_until_start) : 'NOT_STARTED',
-      };
-    }
-
-    if (competition.effective_status === 'ended') {
-      return { label: 'STATUS', value: 'ENDED' };
-    }
-
-    if (!competition.end_time) {
-      return { label: 'STATUS', value: 'IN_PROGRESS' };
-    }
-
-    return {
-      label: 'TIME LEFT',
-      value: competition.seconds_until_end != null ? formatDuration(competition.seconds_until_end) : 'IN_PROGRESS',
-    };
-  })();
+  const competitionName = competition?.competition_name || dashboard?.session?.competition?.name || '比赛同步中';
+  const teamMemberLimit = competition?.team_member_limit || dashboard?.session?.competition_status?.team_member_limit || session?.competition_status?.team_member_limit || null;
   const distributionBars = annotationStats?.counts_by_label?.length
     ? (() => {
         const maxCount = Math.max(...annotationStats.counts_by_label, 0);
@@ -202,7 +164,7 @@ function DashboardPage({
       })()
     : Array.from({ length: 10 }, () => 0);
   const rankMeterSegments = buildRankMeterSegments(ranking?.rank, ranking?.total_ranked_teams);
-  const memberSummary = teamMembers.map((member) => member.username).join(', ') || 'Awaiting team members';
+  const memberSummary = teamMembers.map((member) => member.username).join(', ') || '等待队员加入';
 
   const handleCopyInviteCode = async () => {
     if (!inviteCode) {
@@ -211,9 +173,9 @@ function DashboardPage({
 
     try {
       await window.navigator.clipboard.writeText(inviteCode);
-      setCopyStatus('Invite code copied.');
+      setCopyStatus('邀请码已复制。');
     } catch {
-      setCopyStatus('Copy failed. Please copy it manually.');
+      setCopyStatus('复制失败，请手动复制。');
     }
   };
 
@@ -222,6 +184,7 @@ function DashboardPage({
       activeSection="dashboard"
       session={session}
       competition={competition}
+      competitionTimer={competitionTimer}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
       isTrainingActive={isTrainingActive}
@@ -233,26 +196,24 @@ function DashboardPage({
           <div className="hero-copy">
             <h1>{competitionName}</h1>
             <div className="hero-meta">
-              <span className="hero-phase">{competition ? `PHASE_${competition.effective_status.toUpperCase()}` : 'PHASE_SYNCING'}</span>
+              <span className="hero-phase">{competition ? `LIVE_${competition.effective_status.toUpperCase()}` : 'SYNCING'}</span>
               <span className="hero-separator">//</span>
-              <span>{`${competitionTimer.label}_${competitionTimer.value}`}</span>
-              <span className="hero-separator">//</span>
-              <span>{`TEAM_MEMBERS_${String(teamMembers.length).padStart(2, '0')}`}</span>
+              <span>{`TEAM ${String(teamMembers.length).padStart(2, '0')} / ${teamMemberLimit || '--'}`}</span>
             </div>
             <p className="hero-member-line">{memberSummary}</p>
           </div>
 
           <div className="hero-timer-block">
-            <p>{competitionTimer.label}</p>
-            <div className="hero-timer">{competitionTimer.value}</div>
+            <p>{competitionTimer?.label || '状态'}</p>
+            <div className="hero-timer">{competitionTimer?.value || '--'}</div>
           </div>
         </header>
 
         <div className="stats-grid">
           <section className="stat-card stat-card-primary invite-card">
             <div className="card-header-row">
-              <h3>Team Invite Code</h3>
-              <span className="digits-count">{teamMembers.length} <span>MEMBERS</span></span>
+              <h3>队伍邀请码</h3>
+              <span className="digits-count">{teamMembers.length} <span>/ {teamMemberLimit || '--'} 成员</span></span>
             </div>
             <div className="invite-code-row">
               <span className="invite-code-value">{inviteCode || '--'}</span>
@@ -260,15 +221,13 @@ function DashboardPage({
                 <span className="material-symbols-outlined">content_copy</span>
               </button>
             </div>
-            <p className="stat-note">
-              {memberSummary}
-            </p>
+            <p className="stat-note">{memberSummary}</p>
             {copyStatus ? <p className="terminal-feedback invite-feedback">{copyStatus}</p> : null}
           </section>
 
           <section className="stat-card stat-card-primary">
             <div className="stat-corner" aria-hidden="true" />
-            <h3>Global Ranking</h3>
+            <h3>队伍排名</h3>
             <div className="stat-rank-row">
               <span className="rank-value">{ranking?.rank ? `#${ranking.rank}` : '--'}</span>
               <span className="rank-total">{`/ ${ranking?.total_ranked_teams || 0}`}</span>
@@ -283,16 +242,16 @@ function DashboardPage({
             </div>
             <p className="stat-note">
               {ranking?.rank && ranking?.percentile
-                ? `TOP ${Math.max(1, Math.round(ranking.percentile * 100))}% PERCENTILE`
-                : 'WAITING_FOR_VALIDATION_SCORE'}
+                ? `超过 ${Math.max(1, Math.round(ranking.percentile * 100))}% 的队伍`
+                : '等待下一次验证'}
             </p>
           </section>
 
           <section className="stat-card stat-card-secondary">
             <div className="card-header-row">
-              <h3>Data Distribution</h3>
+              <h3>标注分布</h3>
               <span className="digits-count">
-                {annotationStats?.total_count?.toLocaleString?.() || '0'} <span>DIGITS</span>
+                {annotationStats?.total_count?.toLocaleString?.() || '0'} <span>样本</span>
               </span>
             </div>
             <div className="distribution-chart">
@@ -300,20 +259,20 @@ function DashboardPage({
                 <div
                   key={index}
                   className="distribution-bar"
-                  title={`Digit ${index}: ${annotationStats?.counts_by_label?.[index] || 0}`}
+                  title={`数字 ${index}: ${annotationStats?.counts_by_label?.[index] || 0}`}
                   style={{ height: `${height}%` }}
                 />
               ))}
             </div>
             <div className="distribution-labels">
               <span>0</span>
-              <span>CLASS_IDS</span>
+              <span>类别</span>
               <span>9</span>
             </div>
           </section>
 
           <section className="stat-card stat-card-tertiary">
-            <h3>Latest Validation</h3>
+            <h3>最近一次验证</h3>
             <div className="validation-row">
               <span className="validation-score">{toDisplayPercent(latestValidation?.latest_accuracy)}</span>
               <span className="material-symbols-outlined validation-icon">
@@ -322,14 +281,14 @@ function DashboardPage({
             </div>
             <p className="validation-note">
               {latestValidation?.previous_best_accuracy !== null && latestValidation?.previous_best_accuracy !== undefined
-                ? `PREVIOUS_BEST: ${toDisplayPercent(latestValidation.previous_best_accuracy)}`
-                : 'PREVIOUS_BEST: --'}
+                ? `历史最好：${toDisplayPercent(latestValidation.previous_best_accuracy)}`
+                : '历史最好：--'}
             </p>
             <div className="validation-log">
               <span>
                 {latestValidation?.submitted_by
-                  ? `${latestValidation.submitted_by} // ${latestValidation.sample_count || '--'} SAMPLES`
-                  : 'NO_VALIDATION_RESULT_YET'}
+                  ? `${latestValidation.submitted_by} // ${latestValidation.sample_count || '--'} 个样本`
+                  : '还没有新的验证记录'}
               </span>
               <span className="material-symbols-outlined">terminal</span>
             </div>
@@ -337,34 +296,34 @@ function DashboardPage({
         </div>
 
         {errorMessage ? <div className="dashboard-banner dashboard-banner-error">{errorMessage}</div> : null}
-        {!errorMessage && isLoading ? <div className="dashboard-banner">Loading dashboard telemetry...</div> : null}
+        {!errorMessage && isLoading ? <div className="dashboard-banner">正在加载比赛总览...</div> : null}
         {!errorMessage && competition?.effective_status === 'not_started' ? (
-          <div className="dashboard-banner">Competition has not started yet. Score submission is locked.</div>
+          <div className="dashboard-banner">赛事尚未开始，提交通道暂未开放。</div>
         ) : null}
         {!errorMessage && competition?.effective_status === 'ended' ? (
-          <div className="dashboard-banner">Competition has ended. The leaderboard is now fixed.</div>
+          <div className="dashboard-banner">赛事已结束，排行榜已锁定。</div>
         ) : null}
         {!errorMessage && competition && !competition.allow_submission ? (
-          <div className="dashboard-banner">Score submission is temporarily disabled by the teacher.</div>
+          <div className="dashboard-banner">提交通道已暂时关闭。</div>
         ) : null}
 
         <section className="leaderboard-panel">
           <div className="leaderboard-header">
             <h2>
               <span className="material-symbols-outlined leaderboard-icon">leaderboard</span>
-              Top_Sector_Leaderboard
+              赛事榜
             </h2>
-            <span className="leaderboard-status">{`LAST_SYNC // ${formatTimestamp(latestValidation?.submitted_at)}`}</span>
+            <span className="leaderboard-status">{`SYNC // ${formatTimestamp(latestValidation?.submitted_at)}`}</span>
           </div>
 
           <div className="leaderboard-content">
             <table className="leaderboard-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
-                  <th>Team_Identifier</th>
-                  <th>Recent_Accuracy</th>
-                  <th className="align-right">Status</th>
+                  <th>排名</th>
+                  <th>队伍</th>
+                  <th>最近成绩</th>
+                  <th className="align-right">状态</th>
                 </tr>
               </thead>
               <tbody>
@@ -398,7 +357,7 @@ function DashboardPage({
                                 {row.team_name}
                               </span>
                               <span className="team-members-text">
-                                {row.member_names.length ? row.member_names.join(', ') : 'No members yet'}
+                                {row.member_names.length ? row.member_names.join(', ') : '暂无成员'}
                               </span>
                             </div>
                           </div>
@@ -415,7 +374,7 @@ function DashboardPage({
                 ) : (
                   <tr className="leaderboard-row">
                     <td colSpan="4" className="leaderboard-empty-cell">
-                      No scored teams yet. Submit a validation run to populate the leaderboard.
+                      还没有队伍上榜，先提交一次验证结果吧。
                     </td>
                   </tr>
                 )}
@@ -430,22 +389,20 @@ function DashboardPage({
           <div className="terminal-modal arcade-shadow-primary" role="dialog" aria-modal="true">
             <div className="terminal-modal-header">
               <div>
-                <p className="terminal-modal-kicker">TEAM CREATED</p>
-                <h3>INVITE_CODE_READY</h3>
+                <p className="terminal-modal-kicker">TEAM READY</p>
+                <h3>通行码已生成</h3>
               </div>
               <button
                 type="button"
                 className="terminal-modal-close"
                 onClick={onDismissInviteCodeNotice}
-                aria-label="Close invite code notice"
+                aria-label="关闭邀请码提示"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
-            <p className="terminal-modal-copy">
-              SHARE THIS CODE WITH TEAMMATES AFTER THEY ENTER YOUR TEAM NAME.
-            </p>
+            <p className="terminal-modal-copy">把这串通行码发给队友，他们输入后即可加入你的队伍。</p>
             <div className="invite-code-row invite-code-row-modal">
               <span className="invite-code-value">{inviteCodeNotice}</span>
               <button type="button" className="invite-code-copy" onClick={handleCopyInviteCode}>
@@ -455,7 +412,7 @@ function DashboardPage({
 
             <div className="terminal-modal-actions">
               <button type="button" className="arcade-button arcade-button-primary" onClick={onDismissInviteCodeNotice}>
-                ENTER_DASHBOARD
+                进入比赛面板
               </button>
             </div>
           </div>

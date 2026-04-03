@@ -13,7 +13,10 @@ class Settings:
     annotation_storage_path: Path
     mnist_storage_path: Path
     cors_origins: Tuple[str, ...]
+    admin_ui_base_url: str
+    admin_token: str | None
     team_annotation_goal: int
+    team_member_limit: int
     session_duration_hours: int
     submission_challenge_ttl_minutes: int
     submission_cooldown_minutes: int
@@ -40,7 +43,10 @@ def load_settings() -> Settings:
         annotation_storage_path=annotation_storage_path,
         mnist_storage_path=mnist_storage_path,
         cors_origins=cors_origins,
+        admin_ui_base_url=os.getenv("ADMIN_UI_BASE_URL", "http://localhost:5173"),
+        admin_token=os.getenv("ADMIN_TOKEN"),
         team_annotation_goal=int(os.getenv("TEAM_ANNOTATION_GOAL", "50")),
+        team_member_limit=int(os.getenv("TEAM_MEMBER_LIMIT", "5")),
         session_duration_hours=int(os.getenv("SESSION_DURATION_HOURS", "24")),
         submission_challenge_ttl_minutes=int(
             os.getenv("SUBMISSION_CHALLENGE_TTL_MINUTES", "10")

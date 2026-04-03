@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "terminal:utf8": "powershell -ExecutionPolicy Bypass -File ./scripts/enable-utf8.ps1",
     "test:team1-grid": "node scripts/searchTeam1Hyperparams.mjs",
     "test:mixed-mnist": "node scripts/testMixedMnistTraining.mjs"
   },

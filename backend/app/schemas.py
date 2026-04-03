@@ -48,6 +48,7 @@ class SessionResponse(BaseModel):
     session_token: str
     expires_at: str
     competition: CompetitionPayload
+    competition_status: Optional[CompetitionStatusPayload] = None
     user: UserPayload
     team: TeamPayload
 
@@ -63,6 +64,7 @@ class CompetitionStatusPayload(BaseModel):
     seconds_until_start: Optional[int] = None
     seconds_until_end: Optional[int] = None
     annotation_goal: int = Field(ge=0)
+    team_member_limit: int = Field(ge=1)
     submission_limit: int = Field(ge=1)
     submission_cooldown_minutes: int = Field(ge=0)
     allow_submission: bool
@@ -277,10 +279,10 @@ class SubmissionEvaluateResponse(BaseModel):
 
 class CompetitionSettingsUpdateRequest(BaseModel):
     competition_name: str = Field(min_length=1, max_length=128)
-    start_time: Optional[str] = None
     end_time: Optional[str] = None
     manual_status: Optional[str] = None
     annotation_goal: int = Field(ge=0, le=100000)
+    team_member_limit: int = Field(ge=1, le=1000)
     submission_limit: int = Field(ge=1, le=1000)
     submission_cooldown_minutes: int = Field(ge=0, le=1440)
     allow_submission: bool

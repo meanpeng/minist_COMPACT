@@ -36,34 +36,6 @@
   max-width: 56rem;
 }
 
-.begin-admin-entry {
-  position: absolute;
-  top: -3rem;
-  right: 0;
-  display: flex;
-  gap: 0.75rem;
-}
-
-.begin-admin-link {
-  display: inline-flex;
-  align-items: center;
-  border: 2px solid rgba(45, 226, 255, 0.35);
-  background: rgba(45, 226, 255, 0.08);
-  padding: 0.65rem 1rem;
-  color: var(--secondary);
-  text-decoration: none;
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 0.9rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.begin-admin-link-alt {
-  border-color: rgba(156, 255, 147, 0.35);
-  background: rgba(156, 255, 147, 0.08);
-  color: var(--primary);
-}
-
 .brand-accent {
   position: absolute;
   top: -3rem;
@@ -497,7 +469,7 @@
 }
 
 .arcade-button-secondary:hover {
-  background: var(--secondary-fixed);
+  background: var(--secondary-dim);
 }
 
 .card-corner {

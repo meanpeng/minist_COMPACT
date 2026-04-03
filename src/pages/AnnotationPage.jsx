@@ -6,6 +6,7 @@ const labelDigits = Array.from({ length: 10 }, (_, index) => index);
 const BRUSH_SIZE = 24;
 const CANVAS_EXPORT_SIZE = 28;
 const MNIST_DIGIT_BOX_SIZE = 20;
+
 function createEmptyStats(teamId = '') {
   return {
     team_id: teamId,
@@ -22,6 +23,7 @@ function AnnotationPage({
   onResetExperiment,
   trainingUnlocked = false,
   isTrainingActive = false,
+  competitionTimer,
   stats,
   isStatsLoading = false,
   onAnnotationStatsChange,
@@ -33,7 +35,7 @@ function AnnotationPage({
   const historyRef = useRef([]);
   const [selectedDigit, setSelectedDigit] = useState(0);
   const [hasInk, setHasInk] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Draw a digit, then choose its label to upload.');
+  const [statusMessage, setStatusMessage] = useState('手写数字、选定标签即可上传；团队标注自动互通，携手合力攻坚！');
   const [isSubmittingLabel, setIsSubmittingLabel] = useState(null);
 
   const teamId = session?.team?.id || '';
@@ -152,7 +154,7 @@ function AnnotationPage({
     lastPointRef.current = null;
     isDrawingRef.current = false;
     setHasInk(false);
-    setStatusMessage('Canvas cleared. Draw a digit, then choose its label to upload.');
+    setStatusMessage('画布已清空，可以重新写数字。');
   };
 
   const undoLastStroke = () => {
@@ -169,7 +171,7 @@ function AnnotationPage({
     const previousSnapshot = historyRef.current.at(-1);
     if (!previousSnapshot) {
       setHasInk(false);
-      setStatusMessage('Undo complete. Canvas is empty now.');
+      setStatusMessage('已撤销，画布现在是空的。');
       return;
     }
 
@@ -179,7 +181,7 @@ function AnnotationPage({
     };
     image.src = previousSnapshot;
     setHasInk(true);
-    setStatusMessage('Last stroke removed.');
+    setStatusMessage('已撤销上一笔。');
   };
 
   const getRelativePoint = (event) => {
@@ -329,12 +331,7 @@ function AnnotationPage({
       scaledHeight,
     );
 
-    const normalizedImageData = normalizedContext.getImageData(
-      0,
-      0,
-      CANVAS_EXPORT_SIZE,
-      CANVAS_EXPORT_SIZE,
-    );
+    const normalizedImageData = normalizedContext.getImageData(0, 0, CANVAS_EXPORT_SIZE, CANVAS_EXPORT_SIZE);
     const normalizedPixels = normalizedImageData.data;
 
     let sumIntensity = 0;
@@ -373,17 +370,17 @@ function AnnotationPage({
     setSelectedDigit(digit);
 
     if (!sessionToken || !teamId) {
-      setStatusMessage('Please join or create a team before annotating.');
+      setStatusMessage('请先创建或加入队伍，再开始标注。');
       return;
     }
 
     if (!hasInk) {
-      setStatusMessage(`Label ${digit} selected. Draw a digit first, then upload it.`);
+      setStatusMessage(`已选择标签 ${digit}，先写数字再上传。`);
       return;
     }
 
     setIsSubmittingLabel(digit);
-    setStatusMessage(`Uploading digit ${digit} to your team dataset...`);
+    setStatusMessage(`正在把数字 ${digit} 上传到队伍数据集...`);
 
     try {
       const response = await submitAnnotation({
@@ -393,13 +390,9 @@ function AnnotationPage({
 
       onAnnotationStatsChange?.(response.stats);
       clearCanvas();
-      setStatusMessage(
-        `Digit ${digit} uploaded. Team ${session?.team?.name || ''} now has ${response.stats.total_count} labeled samples.`,
-      );
+      setStatusMessage(`数字 ${digit} 上传成功，${session?.team?.name || '当前队伍'} 现有 ${response.stats.total_count} 条标注。`);
     } catch (error) {
-      setStatusMessage(
-        error instanceof ApiError ? error.message : 'Upload failed. Please try again.',
-      );
+      setStatusMessage(error instanceof ApiError ? error.message : '上传失败，请稍后重试。');
     } finally {
       setIsSubmittingLabel(null);
     }
@@ -409,6 +402,7 @@ function AnnotationPage({
     <AppChrome
       activeSection="annotation"
       session={session}
+      competitionTimer={competitionTimer}
       onResetExperiment={onResetExperiment}
       trainingUnlocked={trainingUnlocked}
       isTrainingActive={isTrainingActive}
@@ -421,15 +415,15 @@ function AnnotationPage({
           <section className="canvas-panel">
             <div className="canvas-header">
               <div>
-                <h1>Draw Digit</h1>
-                <p>INPUT_STREAM: RAW_HANDWRITING_V1</p>
+                <h1>手写数字</h1>
+                <p>RAW INPUT // 手写区</p>
               </div>
               <div className="canvas-tools">
                 <button
                   type="button"
                   className="tool-button tool-button-delete"
                   onClick={clearCanvas}
-                  aria-label="Clear canvas"
+                  aria-label="清空画布"
                 >
                   <span className="material-symbols-outlined">delete</span>
                 </button>
@@ -437,7 +431,7 @@ function AnnotationPage({
                   type="button"
                   className="tool-button tool-button-undo"
                   onClick={undoLastStroke}
-                  aria-label="Undo last stroke"
+                  aria-label="撤销上一笔"
                 >
                   <span className="material-symbols-outlined">undo</span>
                 </button>
@@ -467,7 +461,7 @@ function AnnotationPage({
 
             <div className="canvas-footer">
               <span>{statusMessage}</span>
-              <span>RESOLUTION: 28x28_MNIST_STYLIZED</span>
+              <span>自动整理为 28x28</span>
             </div>
           </section>
 
@@ -475,7 +469,7 @@ function AnnotationPage({
             <div className="label-panel">
               <h2>
                 <span className="material-symbols-outlined">sell</span>
-                SELECT_LABEL
+                选择数字标签
               </h2>
               <div className="digit-grid">
                 {labelDigits.map((digit) => (
@@ -490,34 +484,30 @@ function AnnotationPage({
                   </button>
                 ))}
               </div>
-              <p>KEYBOARD_SHORTCUTS: [0-9]</p>
+              <p>快捷键：[0-9]</p>
             </div>
 
             <div className="progress-panel">
               <div className="progress-head">
-                <h2>SESSION_PROGRESS</h2>
+                <h2>队伍数据达标进度</h2>
                 <span>{isStatsLoading ? '--' : `${Math.round(displayStats.progress_ratio * 100)}%`}</span>
               </div>
               <div className="progress-bar-segments" aria-hidden="true">
                 {Array.from({ length: 10 }, (_, index) => (
                   <div
                     key={index}
-                    className={
-                      index < activeSegments
-                        ? 'progress-bar-segment progress-bar-segment-active'
-                        : 'progress-bar-segment'
-                    }
+                    className={index < activeSegments ? 'progress-bar-segment progress-bar-segment-active' : 'progress-bar-segment'}
                   />
                 ))}
               </div>
               <div className="progress-meta">
-                <span>{`TOTAL_LABELED: ${displayStats.total_count.toLocaleString()}`}</span>
-                <span>{`GOAL: ${displayStats.goal.toLocaleString()}`}</span>
+                <span>{`已标注：${displayStats.total_count.toLocaleString()}`}</span>
+                <span>{`目标：${displayStats.goal.toLocaleString()}`}</span>
               </div>
             </div>
 
             <div className="distribution-panel">
-              <h2>LABEL_DISTRIBUTION_CHART</h2>
+              <h2>已提交标签分布</h2>
               <div className="distribution-panel-chart">
                 {distributionBars.map((height, index) => (
                   <div key={index} className="distribution-panel-column">
@@ -547,11 +537,11 @@ function AnnotationPage({
                   {trainingUnlocked ? 'lock_open' : 'lock'}
                 </span>
                 <div className="train-copy">
-                  <span className="train-title">TRAIN MODEL</span>
+                  <span className="train-title">开始训练</span>
                   <span className="train-subtitle">
                     {trainingUnlocked
-                      ? 'TEAM DATASET READY FOR TRAINING'
-                      : `NEED ${trainSamplesRemaining.toLocaleString()} MORE SAMPLES TO UNLOCK CORE TRAINING`}
+                      ? '数据集已就绪，可以进入训练。'
+                      : `还差 ${trainSamplesRemaining.toLocaleString()} 条样本解锁训练`}
                   </span>
                 </div>
                 <div className="train-progress">

@@ -9,7 +9,7 @@ from uuid import uuid4
 from ..config import settings
 from ..database import get_connection
 from ..errors import ConflictError, NotFoundError, UnauthorizedError, ValidationError
-from ..schemas import CompetitionPayload, SessionResponse, TeamPayload, UserPayload
+from ..schemas import CompetitionPayload, CompetitionStatusPayload, SessionResponse, TeamPayload, UserPayload
 from .competition_service import get_competition_settings, list_running_competitions
 
 
@@ -95,6 +95,27 @@ def _fetch_existing_user_by_username(connection, competition_id: str, username: 
     ).fetchone()
 
 
+def _team_member_count(connection, team_id: str) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS member_count
+        FROM users
+        WHERE team_id = ?
+        """,
+        (team_id,),
+    ).fetchone()
+    return int(row["member_count"] if row else 0)
+
+
+def _ensure_team_has_capacity(connection, team_id: str, team_name: str, competition_id: str) -> None:
+    competition = get_competition_settings(competition_id)
+    member_count = _team_member_count(connection, team_id)
+    if member_count >= competition.team_member_limit:
+        raise ConflictError(
+            f"Team {team_name} already has the maximum of {competition.team_member_limit} members."
+        )
+
+
 def _fetch_session_row_by_token(connection, session_token: str):
     return connection.execute(
         """
@@ -120,6 +141,7 @@ def _fetch_session_row_by_token(connection, session_token: str):
 
 
 def _serialize_session(row) -> SessionResponse:
+    competition_status = get_competition_settings(row["competition_id"])
     return SessionResponse(
         session_token=row["session_token"],
         expires_at=row["expires_at"],
@@ -128,6 +150,7 @@ def _serialize_session(row) -> SessionResponse:
             name=row["competition_name"],
             created_at=row["competition_created_at"],
         ),
+        competition_status=competition_status,
         user=UserPayload(id=row["user_id"], username=row["username"]),
         team=TeamPayload(
             id=row["team_id"],
@@ -241,6 +264,9 @@ def join_team(competition_id: str, username: str, invite_code: str) -> SessionRe
                 f"Username already joined team {existing_user_any_team['team_name']} in this competition. "
                 "Please use that team or choose a different username."
             )
+
+        connection.execute("BEGIN IMMEDIATE")
+        _ensure_team_has_capacity(connection, team["id"], team["name"], competition_id)
 
         user_id = str(uuid4())
         created_at = datetime.now(timezone.utc).isoformat()

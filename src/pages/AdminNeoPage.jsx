@@ -10,7 +10,6 @@ import {
   endCompetition,
   fetchAdminBootstrap,
   resetTeamInviteCode,
-  startCompetition,
   updateAdminSettings,
 } from '../lib/api';
 
@@ -21,24 +20,54 @@ const MEMBER_AVATAR_URLS = [
 ];
 
 function formatDateTime(value) {
-  return value ? new Date(value).toLocaleString() : '--';
-}
-
-function formatDate(value) {
-  if (!value) return '';
-  return value.slice(0, 10);
+  return value ? new Date(value).toLocaleString('zh-CN') : '--';
 }
 
 function formatShortStamp(value) {
   if (!value) return '--';
-  return new Date(value).toLocaleString('en-US', {
+  return new Date(value).toLocaleString('zh-CN', {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-  }).toUpperCase();
+  });
+}
+
+function padNumber(value) {
+  return String(value).padStart(2, '0');
+}
+
+function getDateTimeParts(value) {
+  if (!value) {
+    return {
+      date: '',
+      hour: '23',
+      minute: '59',
+    };
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return {
+      date: '',
+      hour: '23',
+      minute: '59',
+    };
+  }
+
+  return {
+    date: `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`,
+    hour: padNumber(date.getHours()),
+    minute: padNumber(date.getMinutes()),
+  };
+}
+
+function buildLocalIsoDateTime(dateValue, hourValue, minuteValue) {
+  if (!dateValue) return null;
+  const dateTime = new Date(`${dateValue}T${padNumber(hourValue)}:${padNumber(minuteValue)}`);
+  return Number.isNaN(dateTime.getTime()) ? null : dateTime.toISOString();
 }
 
 function formatPercent(value) {
@@ -60,9 +89,9 @@ function formatCountdownParts(seconds) {
 }
 
 function getStatusLabel(status) {
-  if (status === 'not_started') return 'NOT_STARTED';
-  if (status === 'running') return 'ACTIVE';
-  if (status === 'ended') return 'ENDED';
+  if (status === 'not_started') return '未开始';
+  if (status === 'running') return '进行中';
+  if (status === 'ended') return '已结束';
   return '--';
 }
 
@@ -70,29 +99,35 @@ function getRemainingSeconds(settings) {
   if (!settings) return null;
   if (settings.effective_status === 'ended') return 0;
   if (settings.effective_status === 'running') return settings.seconds_until_end ?? null;
-  return settings.seconds_until_start ?? null;
+  return null;
 }
 
 function createFormState(settings) {
   if (!settings) {
     return {
       competition_name: '',
-      start_time: '',
-      end_time: '',
+      end_date: '',
+      end_hour: '23',
+      end_minute: '59',
       manual_status: '',
       annotation_goal: 50,
+      team_member_limit: 5,
       submission_limit: 10,
       submission_cooldown_minutes: 5,
       allow_submission: true,
     };
   }
 
+  const endTimeParts = getDateTimeParts(settings.end_time);
+
   return {
     competition_name: settings.competition_name || '',
-    start_time: settings.start_time ? settings.start_time.slice(0, 16) : '',
-    end_time: settings.end_time ? settings.end_time.slice(0, 16) : '',
+    end_date: endTimeParts.date,
+    end_hour: endTimeParts.hour,
+    end_minute: endTimeParts.minute,
     manual_status: settings.manual_status || '',
     annotation_goal: settings.annotation_goal,
+    team_member_limit: settings.team_member_limit,
     submission_limit: settings.submission_limit,
     submission_cooldown_minutes: settings.submission_cooldown_minutes,
     allow_submission: settings.allow_submission,
@@ -111,20 +146,20 @@ function getProgressWidth(count, goal) {
 function getRelativeAge(value) {
   if (!value) return '--';
   const diffSeconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+  if (diffSeconds < 60) return `${diffSeconds} 秒前`;
   const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
+  if (diffHours < 24) return `${diffHours} 小时前`;
+  return `${Math.floor(diffHours / 24)} 天前`;
 }
 
 function getLoadLabel(teams, members) {
   if (!teams || !members) return '--';
   const occupancy = members / Math.max(teams * 4, 1);
-  if (occupancy > 1.2) return 'HEAVY';
-  if (occupancy > 0.8) return 'STABLE';
-  return 'OPTIMAL';
+  if (occupancy > 1.2) return '繁忙';
+  if (occupancy > 0.8) return '稳定';
+  return '良好';
 }
 
 function AdminNeoPage() {
@@ -143,7 +178,7 @@ function AdminNeoPage() {
   useEffect(() => {
     let isActive = true;
 
-    async function loadBootstrap(competitionId, { silent } = { silent: false }) {
+    async function loadBootstrap(competitionId, { silent, syncForm = false } = { silent: false, syncForm: false }) {
       if (!silent) setIsLoading(true);
 
       try {
@@ -151,18 +186,20 @@ function AdminNeoPage() {
         if (!isActive) return;
         setBootstrap(response);
         setSelectedCompetitionId(response.selected_competition_id || '');
-        setSettingsForm(createFormState(response.settings));
+        if (syncForm) {
+          setSettingsForm(createFormState(response.settings));
+        }
         setErrorMessage('');
       } catch (error) {
         if (isActive) {
-          setErrorMessage(error instanceof ApiError ? error.message : 'Admin V2 failed to load.');
+          setErrorMessage(error instanceof ApiError ? error.message : '赛事管理页加载失败。');
         }
       } finally {
         if (isActive && !silent) setIsLoading(false);
       }
     }
 
-    loadBootstrap(selectedCompetitionId || undefined);
+    loadBootstrap(selectedCompetitionId || undefined, { syncForm: true });
     const intervalId = window.setInterval(() => {
       loadBootstrap(selectedCompetitionId || undefined, { silent: true });
     }, REFRESH_INTERVAL_MS);
@@ -210,7 +247,7 @@ function AdminNeoPage() {
       setSettingsForm(createFormState(response.settings));
       setSuccessMessage(successText);
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Action failed.');
+      setErrorMessage(error instanceof ApiError ? error.message : '操作失败。');
     } finally {
       setActiveAction('');
     }
@@ -219,7 +256,7 @@ function AdminNeoPage() {
   async function handleCreateCompetition(event) {
     event.preventDefault();
     if (!newCompetitionName.trim()) {
-      setErrorMessage('Please enter a competition name.');
+      setErrorMessage('请输入赛事名称。');
       return;
     }
 
@@ -233,9 +270,9 @@ function AdminNeoPage() {
       setSettingsForm(createFormState(response.settings));
       setNewCompetitionName('');
       setIsCreateModalOpen(false);
-      setSuccessMessage('Competition created.');
+      setSuccessMessage('赛事已创建。');
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Create competition failed.');
+      setErrorMessage(error instanceof ApiError ? error.message : '创建比赛失败。');
     } finally {
       setIsCreatingCompetition(false);
     }
@@ -251,10 +288,10 @@ function AdminNeoPage() {
     try {
       await updateAdminSettings(settings.competition_id, {
         competition_name: settingsForm.competition_name,
-        start_time: settingsForm.start_time ? new Date(settingsForm.start_time).toISOString() : null,
-        end_time: settingsForm.end_time ? new Date(settingsForm.end_time).toISOString() : null,
+        end_time: buildLocalIsoDateTime(settingsForm.end_date, settingsForm.end_hour, settingsForm.end_minute),
         manual_status: settingsForm.manual_status || null,
         annotation_goal: Number(settingsForm.annotation_goal),
+        team_member_limit: Number(settingsForm.team_member_limit),
         submission_limit: Number(settingsForm.submission_limit),
         submission_cooldown_minutes: Number(settingsForm.submission_cooldown_minutes),
         allow_submission: Boolean(settingsForm.allow_submission),
@@ -263,9 +300,9 @@ function AdminNeoPage() {
       setBootstrap(response);
       setSelectedCompetitionId(response.selected_competition_id || settings.competition_id);
       setSettingsForm(createFormState(response.settings));
-      setSuccessMessage('Settings saved.');
+      setSuccessMessage('设置已保存。');
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Save settings failed.');
+      setErrorMessage(error instanceof ApiError ? error.message : '保存设置失败。');
     } finally {
       setIsSaving(false);
     }
@@ -277,8 +314,8 @@ function AdminNeoPage() {
 
       <aside className="admin-neo-sidebar">
         <div className="admin-neo-sidebar-heading">
-          <div className="admin-neo-sidebar-title">COMPETITIONS</div>
-          <div className="admin-neo-sidebar-subtitle">SYSTEM_INDEX</div>
+          <div className="admin-neo-sidebar-title">赛事总览</div>
+          <div className="admin-neo-sidebar-subtitle">NEURAL_INDEX</div>
         </div>
 
         <div className="admin-neo-sidebar-actions">
@@ -291,7 +328,7 @@ function AdminNeoPage() {
             }}
           >
             <span className="material-symbols-outlined">add_circle</span>
-            新建比赛
+            新建赛事
           </button>
         </div>
 
@@ -299,7 +336,7 @@ function AdminNeoPage() {
           <section className="admin-neo-sidebar-section">
             <div className="admin-neo-sidebar-label">
               <span className="admin-neo-dot admin-neo-dot-live" />
-              ACTIVE_QUESTS
+              进行中的赛事
             </div>
             <div className="admin-neo-sidebar-list">
               {liveCompetitions.length ? liveCompetitions.map((competition) => (
@@ -312,14 +349,14 @@ function AdminNeoPage() {
                   <span className="material-symbols-outlined">videogame_asset</span>
                   <span>{competition.name}</span>
                 </button>
-              )) : <p className="admin-neo-empty-copy">NO_ACTIVE_QUESTS</p>}
+              )) : <p className="admin-neo-empty-copy">暂无进行中的赛事</p>}
             </div>
           </section>
 
           <section className="admin-neo-sidebar-section">
             <div className="admin-neo-sidebar-label admin-neo-sidebar-label-muted">
               <span className="admin-neo-dot" />
-              ARCHIVED_DATA
+              已归档数据
             </div>
             <div className="admin-neo-sidebar-list">
               {competitionGroups.archived.length ? competitionGroups.archived.map((competition) => (
@@ -334,31 +371,15 @@ function AdminNeoPage() {
                   </span>
                   <span>{competition.name}</span>
                 </button>
-              )) : <p className="admin-neo-empty-copy">NO_ARCHIVE</p>}
+              )) : <p className="admin-neo-empty-copy">暂无归档</p>}
             </div>
           </section>
         </nav>
 
         <div className="admin-neo-sidebar-footer">
-          <button
-            type="button"
-            className="admin-neo-deploy-button"
-            disabled={!settings?.competition_id || activeAction === 'start'}
-            onClick={() => runBootstrapAction(
-              'start',
-              async () => {
-                await startCompetition(settings.competition_id);
-                return fetchAdminBootstrap(settings.competition_id);
-              },
-              'Competition started.',
-            )}
-          >
-            DEPLOY_UPDATE
-          </button>
-
           <div className="admin-neo-sidebar-links">
-            <span>BOOTSTRAP: {isLoading ? 'SYNCING' : 'ONLINE'}</span>
-            <span>SELECTED: {settings?.competition_name || 'NONE'}</span>
+            <span>SYNC: {isLoading ? '同步中' : '在线'}</span>
+            <span>当前选择: {settings?.competition_name || '无'}</span>
           </div>
         </div>
       </aside>
@@ -380,15 +401,15 @@ function AdminNeoPage() {
           >
             <div className="admin-neo-modal-header">
               <div>
-                <div className="admin-neo-modal-kicker">COMPETITION_CONTROL</div>
-                <h3 id="admin-neo-create-title">新建比赛</h3>
+                <div className="admin-neo-modal-kicker">赛事管理</div>
+                <h3 id="admin-neo-create-title">新建赛事</h3>
               </div>
               <button
                 type="button"
                 className="admin-neo-modal-close"
                 onClick={() => setIsCreateModalOpen(false)}
                 disabled={isCreatingCompetition}
-                aria-label="Close create competition dialog"
+                aria-label="关闭新建赛事弹窗"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -396,12 +417,12 @@ function AdminNeoPage() {
 
             <form className="admin-neo-modal-form" onSubmit={handleCreateCompetition}>
               <label>
-                <span>比赛名称</span>
+                <span>赛事名称</span>
                 <input
                   type="text"
                   value={newCompetitionName}
                   onChange={(event) => setNewCompetitionName(event.target.value)}
-                  placeholder="例如：2026 春季赛"
+                  placeholder="例如：2026 巅峰赛"
                   autoFocus
                 />
               </label>
@@ -411,7 +432,7 @@ function AdminNeoPage() {
                   取消
                 </button>
                 <button type="submit" className="admin-neo-action-button" disabled={isCreatingCompetition}>
-                  {isCreatingCompetition ? '创建中...' : '创建比赛'}
+                  {isCreatingCompetition ? '创建中...' : '创建赛事'}
                 </button>
               </div>
             </form>
@@ -422,24 +443,23 @@ function AdminNeoPage() {
       <main className="admin-neo-main">
         <section className="admin-neo-overview-grid" id="overview">
           <div className="admin-neo-overview-panel">
-            <div className="admin-neo-overview-status">STATUS: {getStatusLabel(settings?.effective_status)}</div>
+            <div className="admin-neo-overview-status">状态: {getStatusLabel(settings?.effective_status)}</div>
 
             <div className="admin-neo-overview-head">
               <div>
                 <h2>{settings?.competition_name || 'NEURAL_ETHICS_V2'}</h2>
                 <div className="admin-neo-overview-dates">
-                  <span>START: {formatDateTime(settings?.start_time)}</span>
-                  <span>END: {formatDateTime(settings?.end_time)}</span>
+                  <span>结束: {formatDateTime(settings?.end_time)}</span>
                 </div>
               </div>
             </div>
 
             <div className="admin-neo-countdown-grid">
               {[
-                { label: 'DAYS', value: countdownParts[0] },
-                { label: 'HOURS', value: countdownParts[1] },
-                { label: 'MINUTES', value: countdownParts[2] },
-                { label: 'SECONDS', value: countdownParts[3] },
+                { label: '天', value: countdownParts[0] },
+                { label: '小时', value: countdownParts[1] },
+                { label: '分钟', value: countdownParts[2] },
+                { label: '秒', value: countdownParts[3] },
               ].map((item) => (
                 <div key={item.label} className="admin-neo-countdown-card">
                   <div className="admin-neo-countdown-value">{item.value}</div>
@@ -451,51 +471,51 @@ function AdminNeoPage() {
 
           <div className="admin-neo-health-panel">
             <div>
-              <h3>SYSTEM_HEALTH</h3>
+              <h3>赛事状态</h3>
               <div className="admin-neo-health-metrics">
-                <div><span>Uptime</span><strong>{isLoading ? 'SYNC...' : '99.98%'}</strong></div>
-                <div><span>Latency</span><strong>{isLoading ? '--' : '<100ms'}</strong></div>
-                <div><span>Load</span><strong>{loadLabel}</strong></div>
+                <div><span>在线率</span><strong>{isLoading ? '同步中...' : '99.98%'}</strong></div>
+                <div><span>延迟</span><strong>{isLoading ? '--' : '<100ms'}</strong></div>
+                <div><span>负载</span><strong>{loadLabel}</strong></div>
               </div>
             </div>
 
             <div className="admin-neo-terminal-log">
-              <span>&gt; AUTHENTICATING_LAB_CORE...</span>
-              <span>&gt; COMPETITION_ID {settings?.competition_id || '--'}</span>
-              <span>&gt; SUBMISSION_GATE {settings?.allow_submission ? 'OPEN' : 'LOCKED'}</span>
+              <span>&gt; 正在验证核心服务...</span>
+              <span>&gt; 赛事 ID {settings?.competition_id || '--'}</span>
+              <span>&gt; 提交入口 {settings?.allow_submission ? '开放' : '锁定'}</span>
             </div>
           </div>
         </section>
 
         {errorMessage ? <div className="admin-neo-banner is-error">{errorMessage}</div> : null}
         {successMessage ? <div className="admin-neo-banner is-success">{successMessage}</div> : null}
-        {isLoading ? <div className="admin-neo-banner">ADMIN_BOOTSTRAP_LOADING...</div> : null}
+        {isLoading ? <div className="admin-neo-banner">正在加载赛事数据...</div> : null}
 
         <section className="admin-neo-metrics-grid">
           <article className="admin-neo-metric-card">
             <span className="material-symbols-outlined">groups</span>
             <div className="admin-neo-metric-value">{formatCompactNumber(overview?.team_count)}</div>
-            <div className="admin-neo-metric-label">Teams</div>
+            <div className="admin-neo-metric-label">队伍</div>
           </article>
           <article className="admin-neo-metric-card">
             <span className="material-symbols-outlined">person</span>
             <div className="admin-neo-metric-value">{formatCompactNumber(overview?.member_count)}</div>
-            <div className="admin-neo-metric-label">Members</div>
+            <div className="admin-neo-metric-label">成员</div>
           </article>
           <article className="admin-neo-metric-card">
             <span className="material-symbols-outlined">edit_note</span>
             <div className="admin-neo-metric-value">{formatCompactNumber(overview?.annotation_count)}</div>
-            <div className="admin-neo-metric-label">Annotations</div>
+            <div className="admin-neo-metric-label">标注数</div>
           </article>
           <article className="admin-neo-metric-card">
             <span className="material-symbols-outlined">verified</span>
             <div className="admin-neo-metric-value">{formatCompactNumber(overview?.qualified_team_count)}</div>
-            <div className="admin-neo-metric-label">Qualified</div>
+            <div className="admin-neo-metric-label">达标队伍</div>
           </article>
           <article className="admin-neo-metric-card">
             <span className="material-symbols-outlined">upload_file</span>
             <div className="admin-neo-metric-value">{formatCompactNumber(overview?.submitted_team_count)}</div>
-            <div className="admin-neo-metric-label">Submissions</div>
+            <div className="admin-neo-metric-label">提交数</div>
           </article>
           <article className="admin-neo-metric-card admin-neo-metric-card-primary">
             <span className="material-symbols-outlined">stars</span>
@@ -506,7 +526,7 @@ function AdminNeoPage() {
 
         <section className="admin-neo-settings-panel">
           <div className="admin-neo-panel-topbar">
-            <h3><span className="material-symbols-outlined">tune</span> Competition Settings</h3>
+            <h3><span className="material-symbols-outlined">tune</span> 赛事设置</h3>
             <div className="admin-neo-panel-actions">
               <button
                 type="button"
@@ -518,13 +538,13 @@ function AdminNeoPage() {
                     await endCompetition(settings.competition_id);
                     return fetchAdminBootstrap(settings.competition_id);
                   },
-                  'Competition ended.',
+                  '赛事已结束。',
                 )}
               >
-                ABORT_COMP
+                结束赛事
               </button>
               <button type="submit" form="admin-neo-settings-form" className="admin-neo-action-button" disabled={isSaving}>
-                {isSaving ? 'SAVING...' : 'SAVE_CONFIG'}
+                {isSaving ? '保存中...' : '保存设置'}
               </button>
             </div>
           </div>
@@ -532,42 +552,64 @@ function AdminNeoPage() {
           <form id="admin-neo-settings-form" className="admin-neo-settings-grid" onSubmit={handleSaveSettings}>
             <div className="admin-neo-settings-column">
               <label>
-                <span>COMPETITION_NAME</span>
+                <span>赛事名称</span>
                 <input
                   value={settingsForm.competition_name}
                   onChange={(event) => setSettingsForm((current) => ({ ...current, competition_name: event.target.value }))}
                 />
               </label>
 
+              <label>
+                <span>结束日期</span>
+                <input
+                  type="date"
+                  value={settingsForm.end_date}
+                  onChange={(event) => setSettingsForm((current) => ({
+                    ...current,
+                    end_date: event.target.value,
+                  }))}
+                />
+              </label>
+
               <div className="admin-neo-settings-split">
                 <label>
-                  <span>START_DATE</span>
-                  <input
-                    type="date"
-                    value={formatDate(settingsForm.start_time)}
+                  <span>结束小时</span>
+                  <select
+                    value={settingsForm.end_hour}
                     onChange={(event) => setSettingsForm((current) => ({
                       ...current,
-                      start_time: event.target.value ? `${event.target.value}T00:00` : '',
+                      end_hour: event.target.value,
                     }))}
-                  />
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => (
+                      <option key={hour} value={padNumber(hour)}>
+                        {padNumber(hour)}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
-                  <span>END_DATE</span>
-                  <input
-                    type="date"
-                    value={formatDate(settingsForm.end_time)}
+                  <span>结束分钟</span>
+                  <select
+                    value={settingsForm.end_minute}
                     onChange={(event) => setSettingsForm((current) => ({
                       ...current,
-                      end_time: event.target.value ? `${event.target.value}T23:59` : '',
+                      end_minute: event.target.value,
                     }))}
-                  />
+                  >
+                    {Array.from({ length: 60 }, (_, minute) => (
+                      <option key={minute} value={padNumber(minute)}>
+                        {padNumber(minute)}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
             </div>
 
             <div className="admin-neo-settings-column">
               <label>
-                <span>ANNOTATION_TARGET</span>
+                <span>标注目标</span>
                 <input
                   type="number"
                   min="0"
@@ -576,9 +618,19 @@ function AdminNeoPage() {
                 />
               </label>
 
+              <label>
+                <span>队伍人数限制</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={settingsForm.team_member_limit}
+                  onChange={(event) => setSettingsForm((current) => ({ ...current, team_member_limit: event.target.value }))}
+                />
+              </label>
+
               <div className="admin-neo-settings-split">
                 <label>
-                  <span>SUBMISSION_LIMIT</span>
+                  <span>提交次数上限</span>
                   <input
                     type="number"
                     min="1"
@@ -587,7 +639,7 @@ function AdminNeoPage() {
                   />
                 </label>
                 <label>
-                  <span>COOLDOWN (M)</span>
+                  <span>冷却时间（分钟）</span>
                   <input
                     type="number"
                     min="0"
@@ -601,8 +653,8 @@ function AdminNeoPage() {
             <div className="admin-neo-settings-togglebox">
               <div className="admin-neo-toggle-row">
                 <div>
-                  <div className="admin-neo-toggle-title">ALLOW_SUBMISSIONS</div>
-                  <div className="admin-neo-toggle-copy">Global switch for teams</div>
+                  <div className="admin-neo-toggle-title">允许提交</div>
+                  <div className="admin-neo-toggle-copy">队伍级全局开关</div>
                 </div>
                 <label className={settingsForm.allow_submission ? 'admin-neo-switch is-on' : 'admin-neo-switch'}>
                   <input
@@ -616,18 +668,18 @@ function AdminNeoPage() {
 
               <div className="admin-neo-toggle-row">
                 <div>
-                  <div className="admin-neo-toggle-title">MANUAL_STATUS</div>
-                  <div className="admin-neo-toggle-copy">Override time-based state</div>
+                  <div className="admin-neo-toggle-title">手动状态</div>
+                  <div className="admin-neo-toggle-copy">覆盖基于时间的状态</div>
                 </div>
                 <select
                   value={settingsForm.manual_status}
                   onChange={(event) => setSettingsForm((current) => ({ ...current, manual_status: event.target.value }))}
                   className="admin-neo-inline-select"
                 >
-                  <option value="">AUTO</option>
-                  <option value="not_started">NOT_STARTED</option>
-                  <option value="running">ACTIVE</option>
-                  <option value="ended">ENDED</option>
+                  <option value="">自动</option>
+                  <option value="not_started">未开始</option>
+                  <option value="running">进行中</option>
+                  <option value="ended">已结束</option>
                 </select>
               </div>
 
@@ -637,10 +689,10 @@ function AdminNeoPage() {
                 disabled={!settings?.competition_id}
                 onClick={() => {
                   if (!settings?.competition_id) return;
-                  runBootstrapAction('refresh-settings', () => fetchAdminBootstrap(settings.competition_id), 'Competition data refreshed.');
+                  runBootstrapAction('refresh-settings', () => fetchAdminBootstrap(settings.competition_id), '赛事数据已刷新。');
                 }}
               >
-                Reset Competition Data
+                重置赛事数据
               </button>
             </div>
           </form>
@@ -649,18 +701,18 @@ function AdminNeoPage() {
         <section className="admin-neo-registry-grid">
           <div className="admin-neo-table-panel">
             <div className="admin-neo-table-header">
-              <h4>Teams Registry</h4>
-              <span>COUNT: {teams.length}</span>
+              <h4>队伍列表</h4>
+              <span>数量: {teams.length}</span>
             </div>
             <div className="admin-neo-table-wrap">
               <table className="admin-neo-table">
                 <thead>
                   <tr>
-                    <th>Team Name</th>
-                    <th>Code</th>
-                    <th>Progress</th>
-                    <th>Score</th>
-                    <th className="is-right">Actions</th>
+                    <th>队伍名称</th>
+                    <th>邀请码</th>
+                    <th>进度</th>
+                    <th>分数</th>
+                    <th className="is-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -683,7 +735,7 @@ function AdminNeoPage() {
                             onClick={() => runBootstrapAction(
                               `reset-${team.id}`,
                               () => resetTeamInviteCode(settings.competition_id, team.id),
-                              `${team.name} invite code reset.`,
+                              `${team.name} 邀请码已重置。`,
                             )}
                           >
                             <span className="material-symbols-outlined">refresh</span>
@@ -693,8 +745,8 @@ function AdminNeoPage() {
                             className="admin-neo-table-icon is-danger"
                             disabled={!settings?.competition_id || activeAction === `delete-team-${team.id}`}
                             onClick={() => {
-                              if (!window.confirm(`Delete team ${team.name}?`)) return;
-                              runBootstrapAction(`delete-team-${team.id}`, () => deleteTeam(settings.competition_id, team.id), `${team.name} deleted.`);
+                              if (!window.confirm(`确定删除队伍 ${team.name} 吗？`)) return;
+                              runBootstrapAction(`delete-team-${team.id}`, () => deleteTeam(settings.competition_id, team.id), `${team.name} 已删除。`);
                             }}
                           >
                             <span className="material-symbols-outlined">delete</span>
@@ -704,7 +756,7 @@ function AdminNeoPage() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan="5" className="admin-neo-empty-cell">NO_TEAMS_FOUND</td>
+                      <td colSpan="5" className="admin-neo-empty-cell">暂无队伍</td>
                     </tr>
                   )}
                 </tbody>
@@ -713,18 +765,18 @@ function AdminNeoPage() {
           </div>
           <div className="admin-neo-table-panel">
             <div className="admin-neo-table-header">
-              <h4>Member Registry</h4>
-              <span>COUNT: {members.length}</span>
+              <h4>成员列表</h4>
+              <span>数量: {members.length}</span>
             </div>
             <div className="admin-neo-table-wrap">
               <table className="admin-neo-table">
                 <thead>
                   <tr>
-                    <th>Member</th>
-                    <th>Team</th>
-                    <th>Annos</th>
-                    <th>Subs</th>
-                    <th className="is-right">Actions</th>
+                    <th>成员</th>
+                    <th>队伍</th>
+                    <th>标注</th>
+                    <th>提交</th>
+                    <th className="is-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -747,8 +799,8 @@ function AdminNeoPage() {
                           className="admin-neo-table-icon is-danger"
                           disabled={!settings?.competition_id || activeAction === `delete-member-${member.id}`}
                           onClick={() => {
-                            if (!window.confirm(`Delete member ${member.username}?`)) return;
-                            runBootstrapAction(`delete-member-${member.id}`, () => deleteMember(settings.competition_id, member.id), `${member.username} deleted.`);
+                            if (!window.confirm(`确定删除成员 ${member.username} 吗？`)) return;
+                            runBootstrapAction(`delete-member-${member.id}`, () => deleteMember(settings.competition_id, member.id), `${member.username} 已删除。`);
                           }}
                         >
                           <span className="material-symbols-outlined">delete</span>
@@ -757,7 +809,7 @@ function AdminNeoPage() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan="5" className="admin-neo-empty-cell">NO_MEMBERS_FOUND</td>
+                      <td colSpan="5" className="admin-neo-empty-cell">暂无成员</td>
                     </tr>
                   )}
                 </tbody>
@@ -768,18 +820,18 @@ function AdminNeoPage() {
 
         <section className="admin-neo-leaderboard-panel">
           <div className="admin-neo-panel-title">
-            <h3><span className="material-symbols-outlined">leaderboard</span> Global Leaderboard</h3>
+            <h3><span className="material-symbols-outlined">leaderboard</span> 全局排行榜</h3>
           </div>
           <div className="admin-neo-table-wrap">
             <table className="admin-neo-table admin-neo-leaderboard-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
-                  <th>Team Name</th>
-                  <th>Accuracy</th>
-                  <th>Parameters</th>
-                  <th>Submitter</th>
-                  <th>Timestamp</th>
+                  <th>排名</th>
+                  <th>队伍名称</th>
+                  <th>准确率</th>
+                  <th>参数量</th>
+                  <th>提交人</th>
+                  <th>时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -794,7 +846,7 @@ function AdminNeoPage() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan="6" className="admin-neo-empty-cell">NO_LEADERBOARD_DATA</td>
+                    <td colSpan="6" className="admin-neo-empty-cell">暂无排行榜数据</td>
                   </tr>
                 )}
               </tbody>
@@ -804,17 +856,17 @@ function AdminNeoPage() {
 
         <section className="admin-neo-feed-section">
           <div className="admin-neo-feed-header">
-            <h3><span className="material-symbols-outlined">collections</span> Annotation Feed</h3>
+            <h3><span className="material-symbols-outlined">collections</span> 最新标注</h3>
             <button
               type="button"
               className="admin-neo-feed-button"
               disabled={!settings?.competition_id}
               onClick={() => {
                 if (!settings?.competition_id) return;
-                runBootstrapAction('refresh-feed', () => fetchAdminBootstrap(settings.competition_id), 'Feed refreshed.');
+                runBootstrapAction('refresh-feed', () => fetchAdminBootstrap(settings.competition_id), '最新标注已刷新。');
               }}
             >
-              REFRESH_FEED
+              刷新标注
             </button>
           </div>
 
@@ -822,12 +874,12 @@ function AdminNeoPage() {
             {samples.length ? samples.slice(0, 24).map((sample) => (
               <article key={sample.id} className="admin-neo-feed-card">
                 <div className="admin-neo-feed-image">
-                  <img src={buildApiUrl(sample.image_url)} alt={`annotation-${sample.label}`} />
+                  <img src={buildApiUrl(sample.image_url)} alt={`标注样本-${sample.label}`} />
                 </div>
                 <div className="admin-neo-feed-copy">
                   <div className="admin-neo-feed-team">{sample.team_name}</div>
                   <div className="admin-neo-feed-meta">
-                    <span className="admin-neo-feed-tag">LABEL_{sample.label}</span>
+                    <span className="admin-neo-feed-tag">标签 {sample.label}</span>
                     <span>{getRelativeAge(sample.created_at)}</span>
                   </div>
                 </div>
@@ -836,29 +888,29 @@ function AdminNeoPage() {
                   className="admin-neo-feed-delete"
                   disabled={!settings?.competition_id || activeAction === `delete-annotation-${sample.id}`}
                   onClick={() => {
-                    if (!window.confirm('Delete this annotation sample?')) return;
-                    runBootstrapAction(`delete-annotation-${sample.id}`, () => deleteAnnotation(settings.competition_id, sample.id), 'Annotation sample deleted.');
+                    if (!window.confirm('确定删除这条标注样本吗？')) return;
+                    runBootstrapAction(`delete-annotation-${sample.id}`, () => deleteAnnotation(settings.competition_id, sample.id), '标注样本已删除。');
                   }}
                 >
                   <span className="material-symbols-outlined">delete</span>
                 </button>
               </article>
-            )) : <p className="admin-neo-empty-copy">NO_ANNOTATION_FEED</p>}
+            )) : <p className="admin-neo-empty-copy">暂无最新标注</p>}
           </div>
         </section>
 
         <section className="admin-neo-ops-grid">
           <div className="admin-neo-ops-panel">
             <div className="admin-neo-panel-title">
-              <h3><span className="material-symbols-outlined">hub</span> Team Signals</h3>
+              <h3><span className="material-symbols-outlined">hub</span> 队伍概况</h3>
             </div>
             <div className="admin-neo-signal-list">
               {teams.slice(0, 6).map((team) => (
                 <article key={team.id} className="admin-neo-signal-row">
                   <div>
                     <strong>{team.name}</strong>
-                    <span>MEMBERS {team.member_count} | ANNOS {formatCompactNumber(team.annotation_count)} | SUBS {team.submission_count}</span>
-                    <span>TOP {formatPercent(team.best_accuracy)} | CONTRIBUTORS {(teamDetailMap[team.id]?.member_contributions || []).slice(0, 2).map((member) => member.username).join(', ') || '--'}</span>
+                    <span>成员 {team.member_count}/{settings?.team_member_limit || '--'} | 标注 {formatCompactNumber(team.annotation_count)} | 提交 {team.submission_count}</span>
+                    <span>最佳 {formatPercent(team.best_accuracy)} | 贡献者 {(teamDetailMap[team.id]?.member_contributions || []).slice(0, 2).map((member) => member.username).join(', ') || '--'}</span>
                   </div>
                 </article>
               ))}
@@ -867,17 +919,17 @@ function AdminNeoPage() {
 
           <div className="admin-neo-ops-panel">
             <div className="admin-neo-panel-title">
-              <h3><span className="material-symbols-outlined">inventory_2</span> Submission Archive</h3>
+              <h3><span className="material-symbols-outlined">inventory_2</span> 提交记录</h3>
             </div>
             <div className="admin-neo-table-wrap">
               <table className="admin-neo-table">
                 <thead>
                   <tr>
-                    <th>Team</th>
-                    <th>Member</th>
-                    <th>Accuracy</th>
-                    <th>Params</th>
-                    <th>Actions</th>
+                    <th>队伍</th>
+                    <th>成员</th>
+                    <th>准确率</th>
+                    <th>参数量</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -893,8 +945,8 @@ function AdminNeoPage() {
                           className="admin-neo-table-icon is-danger"
                           disabled={!settings?.competition_id || activeAction === `delete-submission-${submission.id}`}
                           onClick={() => {
-                            if (!window.confirm('Delete this submission record?')) return;
-                            runBootstrapAction(`delete-submission-${submission.id}`, () => deleteSubmission(settings.competition_id, submission.id), 'Submission deleted.');
+                            if (!window.confirm('确定删除这条提交记录吗？')) return;
+                            runBootstrapAction(`delete-submission-${submission.id}`, () => deleteSubmission(settings.competition_id, submission.id), '提交记录已删除。');
                           }}
                         >
                           <span className="material-symbols-outlined">delete</span>
@@ -903,7 +955,7 @@ function AdminNeoPage() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan="5" className="admin-neo-empty-cell">NO_SUBMISSION_RECORDS</td>
+                      <td colSpan="5" className="admin-neo-empty-cell">暂无提交记录</td>
                     </tr>
                   )}
                 </tbody>
@@ -914,11 +966,11 @@ function AdminNeoPage() {
       </main>
 
       <footer className="admin-neo-footer">
-        <div>NEON_LAB_OS v2.4.0-STABLE</div>
+        <div>NEURAL OPS v2.4.0-STABLE</div>
         <div className="admin-neo-footer-right">
-          <span>CORE_TEMP: 34°C</span>
-          <span>SYSTEM_READY</span>
-          <span className="is-primary">ENCRYPTED_SESSION</span>
+          <span>核心温度: 34°C</span>
+          <span>READY</span>
+          <span className="is-primary">安全会话</span>
         </div>
       </footer>
     </div>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+from urllib.parse import quote
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, Header, Request
@@ -71,6 +73,18 @@ app.mount(
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    admin_token = settings.admin_token or secrets.token_urlsafe(24)
+    app.state.admin_token = admin_token
+    encoded_admin_token = quote(admin_token, safe="")
+    admin_link = f"{settings.admin_ui_base_url.rstrip('/')}/?admin_token={encoded_admin_token}#adminneo"
+    print("\n[admin] Management link:")
+    print(f"[admin] {admin_link}")
+
+
+def _require_admin_token(x_admin_token: Optional[str]) -> None:
+    expected_token = getattr(app.state, "admin_token", None)
+    if not expected_token or x_admin_token != expected_token:
+        raise UnauthorizedError("Admin token is invalid or missing.")
 
 
 @app.exception_handler(AppError)
@@ -190,17 +204,28 @@ def evaluate_submission_route(
 
 
 @app.post("/api/admin/competitions", response_model=AdminBootstrapResponse)
-def create_competition_route(payload: CompetitionCreateRequest) -> AdminBootstrapResponse:
+def create_competition_route(
+    payload: CompetitionCreateRequest,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return create_admin_competition(payload.competition_name)
 
 
 @app.get("/api/admin/bootstrap", response_model=AdminBootstrapResponse)
-def admin_bootstrap_default_route() -> AdminBootstrapResponse:
+def admin_bootstrap_default_route(
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return get_admin_bootstrap()
 
 
 @app.get("/api/admin/competitions/{competition_id}/bootstrap", response_model=AdminBootstrapResponse)
-def admin_bootstrap_route(competition_id: str) -> AdminBootstrapResponse:
+def admin_bootstrap_route(
+    competition_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return get_admin_bootstrap(competition_id)
 
 
@@ -208,14 +233,16 @@ def admin_bootstrap_route(competition_id: str) -> AdminBootstrapResponse:
 def update_admin_settings_route(
     competition_id: str,
     payload: CompetitionSettingsUpdateRequest,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ) -> CompetitionStatusPayload:
+    _require_admin_token(x_admin_token)
     return update_admin_settings(
         competition_id=competition_id,
         competition_name=payload.competition_name,
-        start_time=payload.start_time,
         end_time=payload.end_time,
         manual_status=payload.manual_status,
         annotation_goal=payload.annotation_goal,
+        team_member_limit=payload.team_member_limit,
         submission_limit=payload.submission_limit,
         submission_cooldown_minutes=payload.submission_cooldown_minutes,
         allow_submission=payload.allow_submission,
@@ -223,35 +250,68 @@ def update_admin_settings_route(
 
 
 @app.post("/api/admin/competitions/{competition_id}/settings/start", response_model=CompetitionStatusPayload)
-def start_competition_route(competition_id: str) -> CompetitionStatusPayload:
+def start_competition_route(
+    competition_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> CompetitionStatusPayload:
+    _require_admin_token(x_admin_token)
     return start_competition(competition_id)
 
 
 @app.post("/api/admin/competitions/{competition_id}/settings/end", response_model=CompetitionStatusPayload)
-def end_competition_route(competition_id: str) -> CompetitionStatusPayload:
+def end_competition_route(
+    competition_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> CompetitionStatusPayload:
+    _require_admin_token(x_admin_token)
     return end_competition(competition_id)
 
 
 @app.post("/api/admin/competitions/{competition_id}/teams/{team_id}/reset-invite", response_model=AdminBootstrapResponse)
-def reset_team_invite_route(competition_id: str, team_id: str) -> AdminBootstrapResponse:
+def reset_team_invite_route(
+    competition_id: str,
+    team_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return reset_team_invite_code(competition_id, team_id)
 
 
 @app.delete("/api/admin/competitions/{competition_id}/teams/{team_id}", response_model=AdminBootstrapResponse)
-def delete_team_route(competition_id: str, team_id: str) -> AdminBootstrapResponse:
+def delete_team_route(
+    competition_id: str,
+    team_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return delete_team(competition_id, team_id)
 
 
 @app.delete("/api/admin/competitions/{competition_id}/members/{user_id}", response_model=AdminBootstrapResponse)
-def delete_member_route(competition_id: str, user_id: str) -> AdminBootstrapResponse:
+def delete_member_route(
+    competition_id: str,
+    user_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return delete_member(competition_id, user_id)
 
 
 @app.delete("/api/admin/competitions/{competition_id}/annotations/{annotation_id}", response_model=AdminBootstrapResponse)
-def delete_annotation_route(competition_id: str, annotation_id: str) -> AdminBootstrapResponse:
+def delete_annotation_route(
+    competition_id: str,
+    annotation_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return delete_annotation(competition_id, annotation_id)
 
 
 @app.delete("/api/admin/competitions/{competition_id}/submissions/{submission_result_id}", response_model=AdminBootstrapResponse)
-def delete_submission_route(competition_id: str, submission_result_id: str) -> AdminBootstrapResponse:
+def delete_submission_route(
+    competition_id: str,
+    submission_result_id: str,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> AdminBootstrapResponse:
+    _require_admin_token(x_admin_token)
     return delete_submission(competition_id, submission_result_id)

@@ -1,17 +1,17 @@
 const sideNavItems = [
-  { icon: 'dashboard', label: 'Dashboard', key: 'dashboard' },
-  { icon: 'edit_note', label: 'Annotation', key: 'annotation', filled: true },
-  { icon: 'extension', label: 'Modeling', key: 'modeling' },
-  { icon: 'analytics', label: 'Training', key: 'training' },
-  { icon: 'verified', label: 'Submission', key: 'submission' },
+  { icon: 'dashboard', label: '总览', key: 'dashboard' },
+  { icon: 'edit_note', label: '标注', key: 'annotation', filled: true },
+  { icon: 'extension', label: '模型', key: 'modeling' },
+  { icon: 'analytics', label: '训练', key: 'training' },
+  { icon: 'verified', label: '提交', key: 'submission' },
 ];
 
 const mobileNavItems = [
-  { icon: 'dashboard', label: 'DASH', key: 'dashboard' },
-  { icon: 'edit_note', label: 'ANNOTATE', key: 'annotation', filled: true },
-  { icon: 'extension', label: 'MODEL', key: 'modeling' },
-  { icon: 'analytics', label: 'TRAIN', key: 'training' },
-  { icon: 'verified', label: 'DONE', key: 'submission', filled: true },
+  { icon: 'dashboard', label: '总览', key: 'dashboard' },
+  { icon: 'edit_note', label: '标注', key: 'annotation', filled: true },
+  { icon: 'extension', label: '模型', key: 'modeling' },
+  { icon: 'analytics', label: '训练', key: 'training' },
+  { icon: 'verified', label: '提交', key: 'submission', filled: true },
 ];
 
 function getRouteHref(key) {
@@ -19,54 +19,11 @@ function getRouteHref(key) {
 }
 
 function isItemLocked(itemKey, trainingUnlocked) {
-  return itemKey === 'training' && !trainingUnlocked;
+  return (itemKey === 'training' || itemKey === 'submission') && !trainingUnlocked;
 }
 
 function isNavigationBlocked(itemKey, activeSection, isTrainingActive) {
   return isTrainingActive && itemKey !== activeSection;
-}
-
-function formatDuration(totalSeconds) {
-  if (typeof totalSeconds !== 'number' || Number.isNaN(totalSeconds) || totalSeconds < 0) {
-    return '--';
-  }
-
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (days > 0) {
-    return `${days}D ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  }
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
-function buildCompetitionTimer(competition) {
-  if (!competition) {
-    return { label: 'STATUS', value: '--' };
-  }
-
-  if (competition.effective_status === 'not_started') {
-    return {
-      label: 'STARTS IN',
-      value: competition.seconds_until_start != null ? formatDuration(competition.seconds_until_start) : 'NOT_STARTED',
-    };
-  }
-
-  if (competition.effective_status === 'ended') {
-    return { label: 'STATUS', value: 'ENDED' };
-  }
-
-  if (!competition.end_time) {
-    return { label: 'STATUS', value: 'IN_PROGRESS' };
-  }
-
-  return {
-    label: 'TIME LEFT',
-    value: competition.seconds_until_end != null ? formatDuration(competition.seconds_until_end) : 'IN_PROGRESS',
-  };
 }
 
 function AppChrome({
@@ -74,19 +31,19 @@ function AppChrome({
   children,
   session,
   competition = null,
+  competitionTimer = { label: '状态', value: '--' },
   onResetExperiment,
   trainingUnlocked = false,
   isTrainingActive = false,
 }) {
-  const username = session?.user?.username || 'Guest';
-  const teamName = session?.team?.name || 'No Team';
-  const competitionTimer = buildCompetitionTimer(competition);
+  const username = session?.user?.username || '访客';
+  const teamName = session?.team?.name || '未加入队伍';
 
   return (
     <div className="app-shell">
       <header className="top-bar">
         <div className="top-bar-left">
-          <span className="top-bar-title">AI Principle Course</span>
+          <span className="top-bar-title">模王巅峰赛 · MODEL KING PEAK</span>
           <span className="top-bar-timer">{`${competitionTimer.label}: ${competitionTimer.value}`}</span>
         </div>
 
@@ -104,7 +61,7 @@ function AppChrome({
       {isTrainingActive ? (
         <div className="training-lock-banner" role="status" aria-live="polite">
           <span className="material-symbols-outlined">hourglass_top</span>
-          <span>TRAINING IN PROGRESS. OTHER TABS AND RESET ARE TEMPORARILY LOCKED UNTIL THIS RUN FINISHES.</span>
+          <span>训练进行中，切换页面和重新开始会暂时锁定。</span>
         </div>
       ) : null}
 
@@ -146,7 +103,7 @@ function AppChrome({
 
           <div className="side-footer">
             <button type="button" className="experiment-button" onClick={onResetExperiment} disabled={isTrainingActive}>
-              {isTrainingActive ? 'TRAINING_LOCKED' : 'NEW_EXPERIMENT'}
+              {isTrainingActive ? 'LIVE LOCK' : '重新开始比赛'}
             </button>
           </div>
         </aside>
@@ -174,10 +131,10 @@ function AppChrome({
               }
               window.location.hash = item.key;
             }}
-          >
-            <span
-              className="material-symbols-outlined"
-              style={
+            >
+              <span
+                className="material-symbols-outlined"
+                style={
                 item.filled && activeSection === item.key
                   ? { fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" }
                   : undefined

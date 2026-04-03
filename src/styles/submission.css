@@ -261,6 +261,51 @@
   font-weight: 900;
 }
 
+.submission-result-panel {
+  width: 100%;
+  max-width: 32rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid rgba(156, 255, 147, 0.16);
+  background:
+    linear-gradient(135deg, rgba(156, 255, 147, 0.12), rgba(45, 226, 255, 0.08)),
+    var(--surface-container-highest);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+
+.submission-result-panel-ready {
+  border-color: rgba(156, 255, 147, 0.34);
+  box-shadow: 0 20px 50px rgba(156, 255, 147, 0.12);
+}
+
+.submission-result-label {
+  color: var(--secondary);
+  font-family: 'Lexend', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.submission-result-score {
+  margin-top: 0.5rem;
+  color: var(--primary);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  font-weight: 900;
+  font-style: italic;
+  line-height: 0.95;
+  text-shadow: 0 0 18px rgba(156, 255, 147, 0.16);
+}
+
+.submission-result-detail {
+  margin-top: 0.75rem;
+  color: var(--on-surface-variant);
+  font-family: 'Lexend', sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .success-card {
   width: 100%;
   max-width: 32rem;
@@ -300,7 +345,7 @@
   text-transform: uppercase;
 }
 
-.success-copy span {
+.success-copy > div:last-child span {
   color: var(--on-surface-variant);
   font-family: 'Lexend', sans-serif;
   font-size: 11px;
@@ -517,6 +562,7 @@
     padding: 1.5rem 1rem 6rem;
   }
 
+  .submission-result-panel,
   .success-card {
     flex-direction: column;
     align-items: flex-start;

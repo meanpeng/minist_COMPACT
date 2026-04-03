@@ -62,24 +62,24 @@ function BeginPage({ onSessionReady, session }) {
 
   const locationLabel =
     serverStatus === 'online'
-      ? 'SERVER: CONNECTED'
+      ? '服务已连接'
       : serverStatus === 'offline'
-        ? 'SERVER: DISCONNECTED'
-        : 'SERVER: CHECKING';
+        ? '服务未连接'
+        : '服务检测中';
 
   const validateCommonFields = () => {
     if (hasActiveTeamSession) {
-      setErrorMessage(`You have already joined ${session.team.name}. Start a new experiment first if you want to switch teams.`);
+      setErrorMessage(`你已经加入 ${session.team.name}，若要切换队伍请先重新开始。`);
       return false;
     }
 
     if (!selectedCompetitionId) {
-      setErrorMessage('No active competition is available right now. Please contact the teacher first.');
+      setErrorMessage('当前没有可加入的比赛，请先联系老师。');
       return false;
     }
 
     if (!username.trim()) {
-      setErrorMessage('Please enter a username first.');
+      setErrorMessage('请先输入用户名。');
       return false;
     }
 
@@ -92,7 +92,7 @@ function BeginPage({ onSessionReady, session }) {
     }
 
     if (!teamName.trim()) {
-      setErrorMessage('Please enter a team name.');
+      setErrorMessage('请输入队伍名称。');
       return;
     }
 
@@ -107,7 +107,7 @@ function BeginPage({ onSessionReady, session }) {
       });
       onSessionReady(nextSession, { showInviteCodeNotice: true });
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Unable to create team right now.');
+      setErrorMessage(error instanceof ApiError ? error.message : '暂时无法创建队伍。');
     } finally {
       setActiveAction('');
     }
@@ -119,7 +119,7 @@ function BeginPage({ onSessionReady, session }) {
     }
 
     if (!joinInviteCode.trim()) {
-      setErrorMessage('Please enter the invite code.');
+      setErrorMessage('请输入邀请码。');
       return;
     }
 
@@ -134,7 +134,7 @@ function BeginPage({ onSessionReady, session }) {
       });
       onSessionReady(nextSession);
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'Unable to join team right now.');
+      setErrorMessage(error instanceof ApiError ? error.message : '暂时无法加入队伍。');
     } finally {
       setActiveAction('');
     }
@@ -147,26 +147,17 @@ function BeginPage({ onSessionReady, session }) {
 
       <main className="begin-page">
         <div className="begin-shell">
-          <div className="begin-admin-entry">
-            <a href="#admin" className="begin-admin-link">
-              Teacher Admin
-            </a>
-            <a href="#admin-v2" className="begin-admin-link begin-admin-link-alt">
-              Teacher Admin V2
-            </a>
-          </div>
-
           <div className="brand-accent">
             <span className="material-symbols-outlined brand-icon">terminal</span>
-            <span>BITLAB QUEST</span>
+            <span>MODEL KING</span>
           </div>
 
           <div className="terminal-frame arcade-shadow">
             <div className="terminal-panel">
               <header className="terminal-header">
                 <div>
-                  <h1 className="terminal-title">AI_PRINCIPLES_COURSE</h1>
-                  <p className="terminal-status">TERMINAL STATUS: ONLINE // SYSTEM READY</p>
+                  <h1 className="terminal-title">模王巅峰赛</h1>
+                  <p className="terminal-status">MODEL KING PEAK // READY TO PLAY</p>
                 </div>
 
                 <div className={`terminal-location terminal-location-${serverStatus}`}>
@@ -178,24 +169,23 @@ function BeginPage({ onSessionReady, session }) {
               <section className="login-section">
                 <div className="section-title-row">
                   <span className="step-badge step-badge-primary">STEP_01</span>
-                  <h2>CURRENT_COMPETITION</h2>
+                  <h2>本场赛事</h2>
                 </div>
 
                 <div className="competition-display-card">
-                  <div className="competition-display-label">RUNNING_MATCH</div>
                   <div className="competition-display-name">
-                    {selectedCompetition ? selectedCompetition.name : 'NO_COMPETITION_AVAILABLE'}
+                    {selectedCompetition ? selectedCompetition.name : '暂无赛事'}
                   </div>
                   <p className="terminal-feedback">
                     {selectedCompetition
-                      ? 'Competition is assigned automatically. You can continue directly to team setup.'
-                      : 'No running competition is available right now. Please contact the teacher before continuing.'}
+                      ? '系统会自动匹配当前赛事，组队完成后即可进入。'
+                      : '当前没有进行中的赛事，请先联系管理员。'}
                   </p>
                 </div>
 
                 <div className="section-title-row begin-section-gap">
                   <span className="step-badge step-badge-secondary">STEP_02</span>
-                  <h2>ENTER_AND_JOIN</h2>
+                  <h2>加入比赛</h2>
                 </div>
 
                 <div className="field-group">
@@ -204,7 +194,7 @@ function BeginPage({ onSessionReady, session }) {
                   </div>
                   <input
                     className="terminal-input terminal-input-lg terminal-input-primary"
-                    placeholder="ENTER_USERNAME"
+                    placeholder="输入昵称"
                     type="text"
                     value={username}
                     onChange={(event) => setUsername(event.target.value)}
@@ -218,9 +208,9 @@ function BeginPage({ onSessionReady, session }) {
                   <div className="terminal-session-lock">
                     <div className="terminal-session-lock-header">
                       <span className="material-symbols-outlined">shield_lock</span>
-                      <strong>ACTIVE_TEAM_SESSION_DETECTED</strong>
+                      <strong>检测到已有队伍会话</strong>
                     </div>
-                    <p>{`${session.user.username} is already assigned to ${session.team.name} in ${session.competition?.name || 'this competition'}.`}</p>
+                    <p>{`${session.user.username} 已加入 ${session.team.name}，当前属于 ${session.competition?.name || '本场比赛'}。`}</p>
                     <button
                       type="button"
                       className="arcade-button arcade-button-primary terminal-session-lock-button"
@@ -228,7 +218,7 @@ function BeginPage({ onSessionReady, session }) {
                         window.location.hash = 'dashboard';
                       }}
                     >
-                      RETURN_TO_DASHBOARD
+                      返回总览
                     </button>
                   </div>
                 ) : null}
@@ -236,21 +226,18 @@ function BeginPage({ onSessionReady, session }) {
 
               <section>
                 <div className="command-grid">
-                  <div className="command-card command-card-primary">
+              <div className="command-card command-card-primary">
                     <div className="command-heading">
                       <span className="material-symbols-outlined command-icon-primary">group</span>
-                      <h3>INITIATE_SQUAD</h3>
+                      <h3>创建队伍</h3>
                     </div>
 
-                    <p>
-                      Create a new team in the current competition. Teams, members, annotations and rankings
-                      are bound to this match automatically.
-                    </p>
+                    <p>集结队友开练！标注数据、模型战绩一键同步</p>
 
                     <div className="command-actions">
                       <input
                         className="terminal-input terminal-input-primary"
-                        placeholder="NEW_SQUAD_NAME"
+                        placeholder="队伍名称"
                         type="text"
                         value={teamName}
                         onChange={(event) => setTeamName(event.target.value)}
@@ -262,7 +249,7 @@ function BeginPage({ onSessionReady, session }) {
                         onClick={submitCreateTeam}
                         disabled={activeAction === 'create' || hasActiveTeamSession || !selectedCompetitionId}
                       >
-                        {activeAction === 'create' ? 'CREATING...' : 'CREATE_COMMAND_UNIT'}
+                        {activeAction === 'create' ? '组队中...' : '创建队伍'}
                       </button>
                     </div>
 
@@ -272,18 +259,15 @@ function BeginPage({ onSessionReady, session }) {
                   <div className="command-card command-card-secondary">
                     <div className="command-heading">
                       <span className="material-symbols-outlined command-icon-secondary">workspace_premium</span>
-                      <h3>JOIN_ALLIANCE</h3>
+                      <h3>加入队伍</h3>
                     </div>
 
-                    <p>
-                      Join an existing team in the current competition directly with the invite code.
-                      The system will match the target team automatically.
-                    </p>
+                    <p>填写专属邀请码即可入伙组队</p>
 
                     <div className="command-actions">
                       <input
                         className="terminal-input terminal-input-secondary"
-                        placeholder="ENTER_INVITE_CODE"
+                        placeholder="输入邀请码"
                         type="text"
                         value={joinInviteCode}
                         onChange={(event) => setJoinInviteCode(event.target.value.toUpperCase())}
@@ -296,7 +280,7 @@ function BeginPage({ onSessionReady, session }) {
                         onClick={submitJoinTeam}
                         disabled={activeAction === 'join' || hasActiveTeamSession || !selectedCompetitionId}
                       >
-                        {activeAction === 'join' ? 'JOINING...' : 'JOIN_WITH_INVITE_CODE'}
+                        {activeAction === 'join' ? '匹配中...' : '加入队伍'}
                       </button>
                     </div>
 
@@ -308,23 +292,23 @@ function BeginPage({ onSessionReady, session }) {
               <footer className="terminal-footer">
                 <div className="footer-stats">
                   <div className="footer-stat">
-                    <span>Competitions</span>
+                    <span>赛事数</span>
                     <strong className="text-primary">{String(competitions.length).padStart(2, '0')}</strong>
                   </div>
                   <div className="footer-stat">
-                    <span>Status</span>
-                    <strong className="text-secondary">{selectedCompetition ? 'READY' : 'BLOCKED'}</strong>
+                    <span>状态</span>
+                    <strong className="text-secondary">{selectedCompetition ? 'READY' : 'WAITING'}</strong>
                   </div>
                 </div>
 
-                <div className="footer-meta">2026 BITLAB_CORP // AUTO_MATCH_BINDING</div>
-                <div className="footer-meta">STUDENT_ENTRY // DIRECT_INVITE_JOIN</div>
+                <div className="footer-meta">2026 MODEL KING // 模王就是你！// MeanPeng</div>
+                <div className="footer-meta">参赛入口 // Invite Code</div>
               </footer>
             </div>
           </div>
 
           <div className="background-label" aria-hidden="true">
-            <span>LOGIN_SEQUENCE</span>
+            <span>READY</span>
           </div>
           <div className="pixel-accent pixel-accent-left" aria-hidden="true" />
           <div className="pixel-accent pixel-accent-right" aria-hidden="true" />
