@@ -261,8 +261,8 @@ class Stage3ConcurrencyAndStabilityTests(unittest.TestCase):
             original_sample_count = submission_service.SUBMISSION_SAMPLE_COUNT
             original_get_dataset = submission_service._get_dataset
             submission_service.SUBMISSION_SAMPLE_COUNT = 8
-            submission_service._DATASET_CACHE = None
-            submission_service._get_dataset = lambda: fake_dataset
+            submission_service._DATASET_CACHE = {}
+            submission_service._get_dataset = lambda test_dataset_source='mnist': fake_dataset
             try:
                 asyncio.run(scenario())
             finally:

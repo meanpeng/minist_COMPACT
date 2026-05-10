@@ -246,6 +246,7 @@ def update_admin_settings_route(
         submission_limit=payload.submission_limit,
         submission_cooldown_minutes=payload.submission_cooldown_minutes,
         allow_submission=payload.allow_submission,
+        test_dataset_source=payload.test_dataset_source,
     )
 
 
@@ -315,3 +316,11 @@ def delete_submission_route(
 ) -> AdminBootstrapResponse:
     _require_admin_token(x_admin_token)
     return delete_submission(competition_id, submission_result_id)
+
+
+if settings.frontend_dist_path.exists():
+    app.mount(
+        "/",
+        StaticFiles(directory=settings.frontend_dist_path, html=True),
+        name="frontend",
+    )

@@ -66,6 +66,7 @@ python -m pip install -r backend/requirements.txt
 - `SUBMISSION_CHALLENGE_TTL_MINUTES`：提交挑战有效期，默认 `10`
 - `SUBMISSION_COOLDOWN_MINUTES`：提交冷却时间，默认 `5`
 - `SUBMISSION_TEAM_MAX_ATTEMPTS`：队伍提交次数上限，默认 `10`
+- `DEFAULT_TEST_DATASET_SOURCE`：新竞赛默认测试集来源，默认 `local_test`，正式竞赛不要使用公开 MNIST 测试集
 - `VITE_API_BASE_URL`：前端请求后端的地址；不设置时默认使用当前站点同源地址，适合 nginx 反代或前后端同域部署
 
 ### 3. 启动后端
@@ -106,7 +107,7 @@ Vite 默认会启动在 `http://localhost:5173`。
 
 ### 一键启动脚本
 
-如果你想一次拉起前后端，可以直接用下面两个脚本：
+如果你想本地开发时一次拉起前后端，可以直接用下面两个脚本。它们会启动后端热重载和 Vite 开发服务器：
 
 ```bash
 bash ./scripts/start-linux.sh
@@ -122,6 +123,20 @@ powershell -ExecutionPolicy Bypass -File ./scripts/start-windows.ps1
 npm run start:linux
 npm run start:windows
 ```
+
+正式部署不要使用上面的开发脚本。先配置好 `ADMIN_TOKEN`、`CORS_ORIGINS`、`ADMIN_UI_BASE_URL` 和隐藏测试集目录，然后使用生产脚本：
+
+```bash
+npm run build
+npm run start:prod:linux
+```
+
+```powershell
+npm run build
+npm run start:prod:windows
+```
+
+生产脚本只启动 FastAPI/Uvicorn，不使用 `--reload`，也不启动 Vite dev server；后端会直接托管 `dist/` 静态文件，并继续提供 `/api` 和 `/health`。
 
 ## 常用脚本
 
@@ -149,6 +164,7 @@ npm run test:stage3:soak
 - SQLite 数据库默认保存在 `backend/data/app.db`
 - 标注图片默认保存在 `backend/data/annotations/`
 - MNIST 数据集默认保存在 `backend/data/mnist/`
+- 正式竞赛隐藏测试集建议放在 `backend/data/test/<label>/*.png`，后端会统一转成 28x28 灰度样本后下发给前端推理
 
 这些目录都可以通过环境变量改写。
 

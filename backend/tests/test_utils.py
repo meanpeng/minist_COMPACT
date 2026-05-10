@@ -26,6 +26,8 @@ def make_test_settings(root: Path, **overrides) -> SimpleNamespace:
         "database_path": root / "app.db",
         "annotation_storage_path": root / "annotations",
         "mnist_storage_path": root / "mnist",
+        "local_test_storage_path": root / "test",
+        "frontend_dist_path": root / "dist",
         "cors_origins": ("http://localhost:5173",),
         "admin_ui_base_url": "http://localhost:5173",
         "admin_token": "admin-token",
@@ -35,6 +37,7 @@ def make_test_settings(root: Path, **overrides) -> SimpleNamespace:
         "submission_challenge_ttl_minutes": 10,
         "submission_cooldown_minutes": 0,
         "submission_team_max_attempts": 1,
+        "default_test_dataset_source": "local_test",
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

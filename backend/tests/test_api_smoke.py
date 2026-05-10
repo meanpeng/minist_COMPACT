@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.services.competition_service import update_competition_settings
 from backend.app.services import submission_service
 from backend.tests.test_utils import patched_backend_environment
 
@@ -20,7 +21,7 @@ PNG_1X1_BASE64 = (
 class Stage1ApiSmokeTests(unittest.TestCase):
     def test_core_stage1_flows(self):
         fake_dataset = SimpleNamespace(
-            images=tuple([b"\x00" * 784 for _ in range(10)]),
+            images=tuple(bytes([index]) * 784 for index in range(10)),
             labels=tuple(range(10)),
         )
 
@@ -28,8 +29,8 @@ class Stage1ApiSmokeTests(unittest.TestCase):
             original_sample_count = submission_service.SUBMISSION_SAMPLE_COUNT
             original_get_dataset = submission_service._get_dataset
             submission_service.SUBMISSION_SAMPLE_COUNT = 5
-            submission_service._DATASET_CACHE = None
-            submission_service._get_dataset = lambda: fake_dataset
+            submission_service._DATASET_CACHE = {}
+            submission_service._get_dataset = lambda test_dataset_source='mnist': fake_dataset
             try:
                 with TestClient(app) as client:
                     create_resp = client.post(
@@ -120,7 +121,11 @@ class Stage1ApiSmokeTests(unittest.TestCase):
                     assert submission_bootstrap_data["sample_count"] == 5
 
                     sample_indexes = [item["index"] for item in submission_bootstrap_data["challenge_images"]]
-                    predictions = [int(fake_dataset.labels[index]) for index in sample_indexes]
+                    assert sample_indexes == list(range(5))
+                    predictions = [
+                        int(fake_dataset.labels[base64.b64decode(item["pixels_b64"])[0]])
+                        for item in submission_bootstrap_data["challenge_images"]
+                    ]
 
                     evaluate_resp = client.post(
                         "/api/submission/evaluate",
@@ -145,3 +150,65 @@ class Stage1ApiSmokeTests(unittest.TestCase):
             finally:
                 submission_service.SUBMISSION_SAMPLE_COUNT = original_sample_count
                 submission_service._get_dataset = original_get_dataset
+
+    def test_local_test_dataset_flow(self):
+        with patched_backend_environment(submission_team_max_attempts=1, submission_cooldown_minutes=0) as settings:
+            submission_service._DATASET_CACHE = {}
+            for label, file_name in ((0, "sample-0.png"), (1, "sample-1.png")):
+                label_dir = settings.local_test_storage_path / str(label)
+                label_dir.mkdir(parents=True, exist_ok=True)
+                (label_dir / file_name).write_bytes(base64.b64decode(PNG_1X1_BASE64))
+
+            update_competition_settings(
+                competition_id="default-competition",
+                competition_name="MNIST Classroom Challenge",
+                end_time=None,
+                manual_status=None,
+                annotation_goal=3,
+                team_member_limit=2,
+                submission_limit=1,
+                submission_cooldown_minutes=0,
+                allow_submission=True,
+                test_dataset_source="local_test",
+            )
+
+            with TestClient(app) as client:
+                create_resp = client.post(
+                    "/api/auth/create-team",
+                    json={
+                        "competition_id": "default-competition",
+                        "username": "alice",
+                        "team_name": "Alpha Squad",
+                    },
+                )
+                assert create_resp.status_code == 200, create_resp.text
+                token = create_resp.json()["session_token"]
+
+                submission_resp = client.get(
+                    "/api/submission/bootstrap",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert submission_resp.status_code == 200, submission_resp.text
+                submission_data = submission_resp.json()
+                assert submission_data["competition"]["test_dataset_source"] == "local_test"
+                assert submission_data["sample_count"] == 2
+
+                decoded_samples = [
+                    base64.b64decode(item["pixels_b64"])
+                    for item in submission_data["challenge_images"]
+                ]
+                assert [item["index"] for item in submission_data["challenge_images"]] == [0, 1]
+                assert all(len(sample) == 28 * 28 for sample in decoded_samples)
+                predictions = [0 for _ in submission_data["challenge_images"]]
+
+                evaluate_resp = client.post(
+                    "/api/submission/evaluate",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "submission_id": submission_data["submission_id"],
+                        "predictions": predictions,
+                        "param_count": 1234,
+                    },
+                )
+                assert evaluate_resp.status_code == 200, evaluate_resp.text
+                assert 0 <= evaluate_resp.json()["accuracy"] <= 1

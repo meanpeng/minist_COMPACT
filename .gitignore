@@ -22,3 +22,12 @@ venv/
 # Build / cache
 coverage/
 *.tsbuildinfo
+.omx/
+
+# Local runtime data
+backend/data/app.db
+backend/data/app.db-*
+backend/data/annotations/
+backend/data/test/
+data/annotations/
+data/test/

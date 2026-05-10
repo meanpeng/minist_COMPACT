@@ -48,6 +48,13 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
     columns = _table_columns(connection, "competition_settings")
     if "competition_id" in columns:
         _ensure_column(connection, "competition_settings", "team_member_limit", "INTEGER NOT NULL DEFAULT 5")
+        _ensure_column(connection, "competition_settings", "test_dataset_source", "TEXT NOT NULL DEFAULT 'mnist'")
+        connection.execute(
+            """
+            UPDATE competition_settings
+            SET test_dataset_source = COALESCE(test_dataset_source, 'mnist')
+            """
+        )
         return
 
     legacy_rows = []
@@ -73,6 +80,7 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
             submission_limit INTEGER NOT NULL,
             submission_cooldown_minutes INTEGER NOT NULL,
             allow_submission INTEGER NOT NULL,
+            test_dataset_source TEXT NOT NULL DEFAULT 'mnist',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (competition_id) REFERENCES competitions(id) ON DELETE CASCADE
@@ -96,10 +104,11 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
+                test_dataset_source,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 DEFAULT_COMPETITION_ID,
@@ -112,6 +121,7 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 row["submission_limit"],
                 row["submission_cooldown_minutes"],
                 row["allow_submission"],
+                settings.default_test_dataset_source,
                 row["created_at"],
                 row["updated_at"],
             ),
@@ -131,10 +141,11 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
+                test_dataset_source,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(competition_id) DO NOTHING
             """,
             (
@@ -144,6 +155,7 @@ def _migrate_competition_settings(connection: sqlite3.Connection) -> None:
                 settings.team_member_limit,
                 settings.submission_team_max_attempts,
                 settings.submission_cooldown_minutes,
+                settings.default_test_dataset_source,
                 now,
                 now,
             ),
@@ -414,6 +426,7 @@ def init_db() -> None:
                 sample_indexes_json TEXT NOT NULL,
                 used_at TEXT,
                 expires_at TEXT,
+                test_dataset_source TEXT NOT NULL DEFAULT 'mnist',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
@@ -448,6 +461,7 @@ def init_db() -> None:
                 submission_limit INTEGER NOT NULL,
                 submission_cooldown_minutes INTEGER NOT NULL,
                 allow_submission INTEGER NOT NULL,
+                test_dataset_source TEXT NOT NULL DEFAULT 'mnist',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (competition_id) REFERENCES competitions(id) ON DELETE CASCADE
@@ -462,6 +476,7 @@ def init_db() -> None:
 
         _ensure_column(connection, "submission_challenges", "used_at", "TEXT")
         _ensure_column(connection, "submission_challenges", "expires_at", "TEXT")
+        _ensure_column(connection, "submission_challenges", "test_dataset_source", "TEXT NOT NULL DEFAULT 'mnist'")
         _ensure_column(connection, "user_training_runs", "augmentation_modes_json", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(connection, "user_training_runs", "augment_copies", "INTEGER NOT NULL DEFAULT 1")
 
@@ -479,10 +494,11 @@ def init_db() -> None:
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
+                test_dataset_source,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(competition_id) DO NOTHING
             """,
             (
@@ -492,6 +508,7 @@ def init_db() -> None:
                 settings.team_member_limit,
                 settings.submission_team_max_attempts,
                 settings.submission_cooldown_minutes,
+                settings.default_test_dataset_source,
                 now,
                 now,
             ),

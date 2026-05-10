@@ -69,6 +69,7 @@ class CompetitionStatusPayload(BaseModel):
     submission_cooldown_minutes: int = Field(ge=0)
     allow_submission: bool
     is_submission_open: bool
+    test_dataset_source: str = Field(default="mnist")
 
 
 class DashboardRankingPayload(BaseModel):
@@ -286,6 +287,7 @@ class CompetitionSettingsUpdateRequest(BaseModel):
     submission_limit: int = Field(ge=1, le=1000)
     submission_cooldown_minutes: int = Field(ge=0, le=1440)
     allow_submission: bool
+    test_dataset_source: str = Field(default="mnist")
 
 
 class CompetitionCreateRequest(BaseModel):

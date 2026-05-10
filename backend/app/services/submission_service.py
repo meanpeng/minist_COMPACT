@@ -6,6 +6,7 @@ import json
 import random
 import struct
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,7 +23,7 @@ from ..schemas import (
     SubmissionScorePayload,
 )
 from .auth_service import get_authenticated_user
-from .competition_service import ensure_submissions_open
+from .competition_service import ensure_submissions_open, _normalize_test_dataset_source
 from .modeling_service import get_model_config
 from .training_service import _serialize_run
 
@@ -38,9 +39,10 @@ SUBMISSION_SAMPLE_COUNT = 1000
 class MnistTestDataset:
     images: Tuple[bytes, ...]
     labels: Tuple[int, ...]
+    source: str
 
 
-_DATASET_CACHE: Optional[MnistTestDataset] = None
+_DATASET_CACHE: dict[str, MnistTestDataset] = {}
 
 
 def _download_if_missing(file_name: str) -> Path:
@@ -72,20 +74,187 @@ def _load_idx_labels(file_path: Path) -> Tuple[int, ...]:
         return tuple(handle.read(count))
 
 
-def _get_dataset() -> MnistTestDataset:
-    global _DATASET_CACHE
+def _apply_png_filter(filter_type: int, scanline: bytearray, previous: bytes, bytes_per_pixel: int) -> bytes:
+    if filter_type == 0:
+        return bytes(scanline)
 
-    if _DATASET_CACHE is None:
-        images_path = _download_if_missing(MNIST_FILES["images"])
-        labels_path = _download_if_missing(MNIST_FILES["labels"])
-        images = _load_idx_images(images_path)
-        labels = _load_idx_labels(labels_path)
-        if len(images) != len(labels):
-            raise ValidationError("MNIST test set images and labels are misaligned.")
+    for index, value in enumerate(scanline):
+        left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+        up = previous[index] if previous else 0
+        up_left = previous[index - bytes_per_pixel] if previous and index >= bytes_per_pixel else 0
 
-        _DATASET_CACHE = MnistTestDataset(images=images, labels=labels)
+        if filter_type == 1:
+            scanline[index] = (value + left) & 0xFF
+        elif filter_type == 2:
+            scanline[index] = (value + up) & 0xFF
+        elif filter_type == 3:
+            scanline[index] = (value + ((left + up) // 2)) & 0xFF
+        elif filter_type == 4:
+            predictor = left + up - up_left
+            pa = abs(predictor - left)
+            pb = abs(predictor - up)
+            pc = abs(predictor - up_left)
+            if pa <= pb and pa <= pc:
+                paeth = left
+            elif pb <= pc:
+                paeth = up
+            else:
+                paeth = up_left
+            scanline[index] = (value + paeth) & 0xFF
+        else:
+            raise ValidationError("Local test PNG uses an unsupported filter.")
 
-    return _DATASET_CACHE
+    return bytes(scanline)
+
+
+def _unpack_png_1bit_grayscale(row: bytes, width: int) -> list[int]:
+    pixels: list[int] = []
+    for byte in row:
+        for shift in range(7, -1, -1):
+            pixels.append(255 if ((byte >> shift) & 1) else 0)
+            if len(pixels) == width:
+                return pixels
+    return pixels
+
+
+def _decode_png_to_grayscale_pixels(image_bytes: bytes) -> tuple[int, int, bytes]:
+    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValidationError("Local test dataset images must be PNG files.")
+
+    offset = 8
+    width = height = bit_depth = color_type = None
+    compressed_parts: list[bytes] = []
+
+    while offset + 8 <= len(image_bytes):
+        chunk_length = struct.unpack(">I", image_bytes[offset : offset + 4])[0]
+        chunk_type = image_bytes[offset + 4 : offset + 8]
+        chunk_data_start = offset + 8
+        chunk_data_end = chunk_data_start + chunk_length
+        chunk_data = image_bytes[chunk_data_start:chunk_data_end]
+        offset = chunk_data_end + 4
+
+        if chunk_type == b"IHDR":
+            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
+                ">IIBBBBB", chunk_data
+            )
+            if compression != 0 or filter_method != 0 or interlace != 0:
+                raise ValidationError("Local test PNG must use standard non-interlaced encoding.")
+        elif chunk_type == b"IDAT":
+            compressed_parts.append(chunk_data)
+        elif chunk_type == b"IEND":
+            break
+
+    if width is None or height is None or bit_depth is None or color_type is None:
+        raise ValidationError("Local test PNG is missing image metadata.")
+    if width <= 0 or height <= 0:
+        raise ValidationError("Local test PNG dimensions are invalid.")
+    if color_type not in {0, 2, 4, 6}:
+        raise ValidationError("Local test PNG color type is unsupported.")
+    if bit_depth not in {1, 8}:
+        raise ValidationError("Local test PNG bit depth must be 1 or 8.")
+    if bit_depth == 1 and color_type != 0:
+        raise ValidationError("1-bit local test PNGs must be grayscale.")
+
+    channels_by_color_type = {0: 1, 2: 3, 4: 2, 6: 4}
+    channels = channels_by_color_type[color_type]
+    bytes_per_pixel = max(1, channels * bit_depth // 8)
+    row_data_bytes = ((width * channels * bit_depth) + 7) // 8
+    decompressed = zlib.decompress(b"".join(compressed_parts))
+    expected_size = (row_data_bytes + 1) * height
+    if len(decompressed) < expected_size:
+        raise ValidationError("Local test PNG pixel data is truncated.")
+
+    grayscale: list[int] = []
+    previous = b"\x00" * row_data_bytes
+    cursor = 0
+    for _ in range(height):
+        filter_type = decompressed[cursor]
+        cursor += 1
+        raw_scanline = bytearray(decompressed[cursor : cursor + row_data_bytes])
+        cursor += row_data_bytes
+        scanline = _apply_png_filter(filter_type, raw_scanline, previous, bytes_per_pixel)
+        previous = scanline
+
+        if bit_depth == 1:
+            grayscale.extend(_unpack_png_1bit_grayscale(scanline, width))
+            continue
+
+        for pixel_start in range(0, width * channels, channels):
+            if color_type in {0, 4}:
+                grayscale.append(scanline[pixel_start])
+            else:
+                red = scanline[pixel_start]
+                green = scanline[pixel_start + 1]
+                blue = scanline[pixel_start + 2]
+                grayscale.append(round((0.299 * red) + (0.587 * green) + (0.114 * blue)))
+
+    return width, height, bytes(grayscale)
+
+
+def _resize_grayscale_nearest(pixels: bytes, width: int, height: int, target_size: int = 28) -> bytes:
+    if width == target_size and height == target_size:
+        return pixels
+
+    resized = bytearray(target_size * target_size)
+    for target_y in range(target_size):
+        source_y = min((target_y * height) // target_size, height - 1)
+        for target_x in range(target_size):
+            source_x = min((target_x * width) // target_size, width - 1)
+            resized[target_y * target_size + target_x] = pixels[source_y * width + source_x]
+    return bytes(resized)
+
+
+def _load_local_png_as_mnist_pixels(image_path: Path) -> bytes:
+    width, height, pixels = _decode_png_to_grayscale_pixels(image_path.read_bytes())
+    return _resize_grayscale_nearest(pixels, width, height)
+
+
+def _load_mnist_dataset() -> MnistTestDataset:
+    images_path = _download_if_missing(MNIST_FILES["images"])
+    labels_path = _download_if_missing(MNIST_FILES["labels"])
+    images = _load_idx_images(images_path)
+    labels = _load_idx_labels(labels_path)
+    if len(images) != len(labels):
+        raise ValidationError("MNIST test set images and labels are misaligned.")
+
+    return MnistTestDataset(images=images, labels=labels, source="mnist")
+
+
+def _load_local_test_dataset() -> MnistTestDataset:
+    root_path = settings.local_test_storage_path
+    if not root_path.exists():
+        raise ValidationError("Local test dataset path does not exist.")
+
+    images: list[bytes] = []
+    labels: list[int] = []
+    label_directories = sorted(
+        (path for path in root_path.iterdir() if path.is_dir() and path.name.isdigit()),
+        key=lambda path: int(path.name),
+    )
+    for label_directory in label_directories:
+        label = int(label_directory.name)
+        if label < 0 or label > 9:
+            raise ValidationError("Local test dataset labels must be directories 0 through 9.")
+        for image_path in sorted(label_directory.glob("*.png")):
+            images.append(_load_local_png_as_mnist_pixels(image_path))
+            labels.append(label)
+
+    if not images:
+        raise ValidationError("Local test dataset is empty.")
+
+    return MnistTestDataset(images=tuple(images), labels=tuple(labels), source="local_test")
+
+
+def _get_dataset(test_dataset_source: str = "mnist") -> MnistTestDataset:
+    normalized_source = _normalize_test_dataset_source(test_dataset_source)
+
+    if normalized_source not in _DATASET_CACHE:
+        if normalized_source == "mnist":
+            _DATASET_CACHE[normalized_source] = _load_mnist_dataset()
+        else:
+            _DATASET_CACHE[normalized_source] = _load_local_test_dataset()
+
+    return _DATASET_CACHE[normalized_source]
 
 
 def _ensure_team_membership(user_id: str, team_id: str) -> None:
@@ -274,8 +443,11 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
             submission_limit=competition.submission_limit,
         )
         if not submission_block_reason:
-            dataset = _get_dataset()
-            sample_indexes = random.sample(range(len(dataset.labels)), SUBMISSION_SAMPLE_COUNT)
+            dataset = _get_dataset(competition.test_dataset_source)
+            challenge_sample_count = min(SUBMISSION_SAMPLE_COUNT, len(dataset.labels))
+            if challenge_sample_count <= 0:
+                raise ValidationError("Test dataset is empty.")
+            sample_indexes = random.sample(range(len(dataset.labels)), challenge_sample_count)
             expires_at = (now_dt + timedelta(minutes=settings.submission_challenge_ttl_minutes)).isoformat()
             submission_id = str(uuid4())
             connection.execute(
@@ -296,9 +468,10 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
                     sample_indexes_json,
                     used_at,
                     expires_at,
+                    test_dataset_source,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     submission_id,
@@ -308,6 +481,7 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
                     json.dumps(sample_indexes),
                     None,
                     expires_at,
+                    competition.test_dataset_source,
                     now,
                 ),
             )
@@ -349,13 +523,13 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
 
     challenge_images: List[SubmissionChallengeImagePayload] = []
     if sample_indexes:
-        dataset = _get_dataset()
+        dataset = _get_dataset(competition.test_dataset_source)
         challenge_images = [
             SubmissionChallengeImagePayload(
-                index=sample_index,
+                index=challenge_index,
                 pixels_b64=base64.b64encode(dataset.images[sample_index]).decode("ascii"),
             )
-            for sample_index in sample_indexes
+            for challenge_index, sample_index in enumerate(sample_indexes)
         ]
 
     return SubmissionBootstrapResponse(
@@ -388,7 +562,6 @@ def evaluate_submission(
     team_id = auth["team_id"]
     competition_id = auth["competition_id"]
     _ensure_team_membership(user_id, team_id)
-    dataset = _get_dataset()
 
     with get_connection() as connection:
         now_dt = datetime.now(timezone.utc)
@@ -404,7 +577,7 @@ def evaluate_submission(
         )
         challenge_row = connection.execute(
             """
-            SELECT sample_indexes_json, used_at, expires_at
+            SELECT sample_indexes_json, used_at, expires_at, test_dataset_source
             FROM submission_challenges
             WHERE id = ? AND competition_id = ? AND user_id = ? AND team_id = ?
             """,
@@ -418,6 +591,8 @@ def evaluate_submission(
             raise ValidationError("This submission challenge has expired. Refresh the submit page and try again.")
 
         sample_indexes = json.loads(challenge_row["sample_indexes_json"])
+        dataset_source = _normalize_test_dataset_source(challenge_row["test_dataset_source"] if "test_dataset_source" in challenge_row.keys() else competition.test_dataset_source)
+        dataset = _get_dataset(dataset_source)
         if len(predictions) != len(sample_indexes):
             raise ValidationError("Prediction count does not match the validation sample count.")
 

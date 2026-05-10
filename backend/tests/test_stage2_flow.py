@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 import unittest
 
@@ -31,8 +32,8 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
             original_sample_count = submission_service.SUBMISSION_SAMPLE_COUNT
             original_get_dataset = submission_service._get_dataset
             submission_service.SUBMISSION_SAMPLE_COUNT = 5
-            submission_service._DATASET_CACHE = None
-            submission_service._get_dataset = lambda: fake_dataset
+            submission_service._DATASET_CACHE = {}
+            submission_service._get_dataset = lambda test_dataset_source='mnist': fake_dataset
             try:
                 with TestClient(app) as client:
                     alice_session = client.post(
@@ -163,7 +164,7 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
                     assert len(alpha_bootstrap_data["challenge_images"]) == 5
 
                     alpha_predictions = [
-                        int(fake_dataset.labels[item["index"]])
+                        int(fake_dataset.labels[base64.b64decode(item["pixels_b64"])[0]])
                         for item in alpha_bootstrap_data["challenge_images"]
                     ]
                     alpha_evaluate = client.post(
@@ -203,7 +204,7 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
                     assert submission_bootstrap_beta.status_code == 200, submission_bootstrap_beta.text
                     beta_bootstrap_data = submission_bootstrap_beta.json()
                     beta_predictions = [
-                        (int(fake_dataset.labels[item["index"]]) + (1 if index == 0 else 0)) % 10
+                        (int(fake_dataset.labels[base64.b64decode(item["pixels_b64"])[0]]) + (1 if index == 0 else 0)) % 10
                         for index, item in enumerate(beta_bootstrap_data["challenge_images"])
                     ]
                     beta_evaluate = client.post(

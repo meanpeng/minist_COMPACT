@@ -115,6 +115,7 @@ function createFormState(settings) {
       submission_limit: 10,
       submission_cooldown_minutes: 5,
       allow_submission: true,
+      test_dataset_source: 'local_test',
     };
   }
 
@@ -131,6 +132,7 @@ function createFormState(settings) {
     submission_limit: settings.submission_limit,
     submission_cooldown_minutes: settings.submission_cooldown_minutes,
     allow_submission: settings.allow_submission,
+    test_dataset_source: settings.test_dataset_source || 'local_test',
   };
 }
 
@@ -160,6 +162,11 @@ function getLoadLabel(teams, members) {
   if (occupancy > 1.2) return '繁忙';
   if (occupancy > 0.8) return '稳定';
   return '良好';
+}
+
+function getDatasetSourceLabel(value) {
+  if (value === 'local_test') return '本地标注测试集';
+  return 'MNIST 测试集';
 }
 
 function AdminNeoPage() {
@@ -295,6 +302,7 @@ function AdminNeoPage() {
         submission_limit: Number(settingsForm.submission_limit),
         submission_cooldown_minutes: Number(settingsForm.submission_cooldown_minutes),
         allow_submission: Boolean(settingsForm.allow_submission),
+        test_dataset_source: settingsForm.test_dataset_source,
       });
       const response = await fetchAdminBootstrap(settings.competition_id);
       setBootstrap(response);
@@ -450,6 +458,7 @@ function AdminNeoPage() {
                 <h2>{settings?.competition_name || 'NEURAL_ETHICS_V2'}</h2>
                 <div className="admin-neo-overview-dates">
                   <span>结束: {formatDateTime(settings?.end_time)}</span>
+                  <span>测试集: {getDatasetSourceLabel(settings?.test_dataset_source)}</span>
                 </div>
               </div>
             </div>
@@ -557,6 +566,17 @@ function AdminNeoPage() {
                   value={settingsForm.competition_name}
                   onChange={(event) => setSettingsForm((current) => ({ ...current, competition_name: event.target.value }))}
                 />
+              </label>
+
+              <label>
+                <span>测试集来源</span>
+                <select
+                  value={settingsForm.test_dataset_source}
+                  onChange={(event) => setSettingsForm((current) => ({ ...current, test_dataset_source: event.target.value }))}
+                >
+                  <option value="mnist">MNIST 测试集</option>
+                  <option value="local_test">本地标注测试集</option>
+                </select>
               </label>
 
               <label>

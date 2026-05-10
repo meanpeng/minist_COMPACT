@@ -10,6 +10,7 @@ from ..errors import NotFoundError, ValidationError
 from ..schemas import AdminCompetitionListItemPayload, CompetitionPayload, CompetitionStatusPayload
 
 VALID_MANUAL_STATUSES = {"not_started", "running", "ended"}
+VALID_TEST_DATASET_SOURCES = {"mnist", "local_test"}
 
 
 def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datetime]:
@@ -24,6 +25,13 @@ def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datet
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _normalize_test_dataset_source(value: Optional[str]) -> str:
+    normalized = (value or "mnist").strip()
+    if normalized not in VALID_TEST_DATASET_SOURCES:
+        raise ValidationError("Test dataset source must be one of: mnist, local_test.")
+    return normalized
 
 
 def _status_from_end_time(now: datetime, end_time: Optional[datetime]) -> str:
@@ -61,6 +69,7 @@ def build_competition_payload(row, now: Optional[datetime] = None) -> Competitio
         submission_cooldown_minutes=row["submission_cooldown_minutes"],
         allow_submission=allow_submission,
         is_submission_open=is_submission_open,
+        test_dataset_source=_normalize_test_dataset_source(row["test_dataset_source"] if "test_dataset_source" in row.keys() else "mnist"),
     )
 
 
@@ -129,6 +138,7 @@ def list_competition_statuses_for_admin(selected_competition_id: Optional[str] =
                 cs.submission_limit,
                 cs.submission_cooldown_minutes,
                 cs.allow_submission,
+                cs.test_dataset_source,
                 cs.created_at AS settings_created_at,
                 cs.updated_at
             FROM competitions c
@@ -191,12 +201,20 @@ def create_competition(competition_name: str) -> CompetitionPayload:
                 submission_limit,
                 submission_cooldown_minutes,
                 allow_submission,
+                test_dataset_source,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, NULL, NULL, NULL, 50, ?, 10, 5, 1, ?, ?)
+            VALUES (?, ?, NULL, NULL, NULL, 50, ?, 10, 5, 1, ?, ?, ?)
             """,
-            (competition_id, normalized_name, settings.team_member_limit, now, now),
+            (
+                competition_id,
+                normalized_name,
+                settings.team_member_limit,
+                settings.default_test_dataset_source,
+                now,
+                now,
+            ),
         )
         connection.commit()
 
@@ -229,6 +247,7 @@ def update_competition_settings(
     submission_limit: int,
     submission_cooldown_minutes: int,
     allow_submission: bool,
+    test_dataset_source: str = "mnist",
 ) -> CompetitionStatusPayload:
     normalized_name = " ".join(competition_name.strip().split())
     if not normalized_name:
@@ -239,10 +258,21 @@ def update_competition_settings(
         raise ValidationError("Manual status must be one of: not_started, running, ended.")
 
     parsed_end = _parse_iso_datetime(end_time, "end_time")
+    normalized_dataset_source = _normalize_test_dataset_source(test_dataset_source)
 
     updated_at = datetime.now(timezone.utc).isoformat()
 
     with get_connection() as connection:
+        current_source_row = connection.execute(
+            """
+            SELECT test_dataset_source
+            FROM competition_settings
+            WHERE competition_id = ?
+            """,
+            (competition_id,),
+        ).fetchone()
+        current_source = _normalize_test_dataset_source(current_source_row["test_dataset_source"] if current_source_row else "mnist")
+
         existing = connection.execute(
             """
             SELECT id
@@ -291,6 +321,7 @@ def update_competition_settings(
                 submission_limit = ?,
                 submission_cooldown_minutes = ?,
                 allow_submission = ?,
+                test_dataset_source = ?,
                 updated_at = ?
             WHERE competition_id = ?
             """,
@@ -303,10 +334,19 @@ def update_competition_settings(
                 submission_limit,
                 submission_cooldown_minutes,
                 1 if allow_submission else 0,
+                normalized_dataset_source,
                 updated_at,
                 competition_id,
             ),
         )
+        if current_source != normalized_dataset_source:
+            connection.execute(
+                """
+                DELETE FROM submission_challenges
+                WHERE competition_id = ? AND used_at IS NULL
+                """,
+                (competition_id,),
+            )
         connection.commit()
 
     return get_competition_settings(competition_id)
@@ -386,6 +426,7 @@ def list_running_competitions() -> list[CompetitionPayload]:
                 cs.submission_limit,
                 cs.submission_cooldown_minutes,
                 cs.allow_submission,
+                cs.test_dataset_source,
                 cs.created_at AS settings_created_at,
                 cs.updated_at
             FROM competitions c

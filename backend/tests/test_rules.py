@@ -57,6 +57,7 @@ class CompetitionRuleTests(unittest.TestCase):
                     submission_limit=1,
                     submission_cooldown_minutes=0,
                     allow_submission=True,
+                    test_dataset_source="mnist",
                 )
             except ValidationError as exc:
                 self.assertIn("Another competition is already running", str(exc))
