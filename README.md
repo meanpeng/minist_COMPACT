@@ -96,6 +96,50 @@ Vite 默认会启动在 `http://localhost:5173`。
 
 ## 部署建议
 
+### Docker + Nginx 部署
+
+项目已经提供 Docker 打包配置。镜像会先构建 Vite 前端，再用 FastAPI/Uvicorn 同时托管静态页面、`/api` 和 `/health`。`docker-compose.yml` 会额外启动一个 Nginx 容器，把公网 `80` 端口反向代理到应用容器的 `8000` 端口。
+
+在云服务器上安装 Docker 和 Docker Compose 后执行：
+
+```bash
+cp .env.docker.example .env
+```
+
+编辑 `.env`，生产环境建议至少设置一个固定的 `ADMIN_TOKEN`。`ADMIN_UI_BASE_URL` 和 `CORS_ORIGINS` 在当前同域 Nginx 部署下不是必填项；只有当你希望后端日志打印完整公网管理员链接，或者前端和 API 分别部署在不同域名/端口时，才需要显式设置。若服务器的 80 端口已被占用，可以把 `HTTP_PORT` 改成其它端口。然后启动：
+
+```bash
+docker compose up -d --build
+```
+
+访问：
+
+- 普通入口：`http://服务器IP/#begin`
+- 管理员入口：`http://服务器IP/?admin_token=你的ADMIN_TOKEN#adminneo`
+- 健康检查：`http://服务器IP/health`
+
+运行数据保存在 Docker 命名卷 `mnist-runtime` 中，包括 SQLite 数据库、标注图片和本地隐藏测试集目录。升级镜像时直接重新执行：
+
+```bash
+docker compose up -d --build
+```
+
+如果要放隐藏测试集，推荐复制到容器的 `/app/runtime/test/<label>/*.png`，或先把数据放进命名卷对应目录，再在管理后台把测试集来源切到 `local_test`。
+
+查看日志：
+
+```bash
+docker compose logs -f mnist-compact
+```
+
+查看 Nginx 反代日志：
+
+```bash
+docker compose logs -f nginx
+```
+
+### 手动生产部署
+
 如果你准备把项目部署到云服务器，最省心的方式是：
 
 1. 前端构建后由 nginx 静态托管
