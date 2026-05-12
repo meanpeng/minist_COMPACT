@@ -772,7 +772,7 @@ function TrainingPage({
                   </div>
 
                   <button type="button" className="training-start-button" onClick={handleStartTraining} disabled={!canTrain}>
-                    {isTraining ? '训练中...' : '开始冲刺'}
+                    {isTraining ? '训练中...' : '开始训练'}
                   </button>
                 </div>
               </div>
