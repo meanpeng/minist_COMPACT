@@ -4,8 +4,10 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import unittest
 
-from backend.app.errors import ValidationError
+from backend.app.errors import RateLimitError, ValidationError
 from backend.app.services.auth_service import create_team, join_team
+from backend.app.services import annotation_service
+from backend.app.services.annotation_service import submit_annotation
 from backend.app.services.competition_service import (
     _validate_single_running_competition,
     build_competition_payload,
@@ -18,6 +20,11 @@ from backend.app.services.submission_service import _validate_submission_limits
 from backend.app.database import get_connection
 from backend.tests.test_utils import patched_backend_environment
 from backend.app.schemas import ModelLayerPayload
+
+PNG_1X1_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+    "x8AAwMCAO2qfG0AAAAASUVORK5CYII="
+)
 
 
 class CompetitionRuleTests(unittest.TestCase):
@@ -213,3 +220,63 @@ class SubmissionLimitTests(unittest.TestCase):
                         submission_limit=1,
                     )
             self.assertIn("submission limit of 1 attempts", str(exc_info.exception))
+
+
+class AnnotationSubmitLimitTests(unittest.TestCase):
+    def test_user_cooldown_blocks_immediate_repeat_annotation(self):
+        with patched_backend_environment():
+            session = create_team("default-competition", "alice", "Alpha")
+
+            submit_annotation(
+                session_token=session.session_token,
+                label=1,
+                image_base64=f"data:image/png;base64,{PNG_1X1_BASE64}",
+            )
+
+            with self.assertRaises(RateLimitError) as exc_info:
+                submit_annotation(
+                    session_token=session.session_token,
+                    label=2,
+                    image_base64=f"data:image/png;base64,{PNG_1X1_BASE64}",
+                )
+            self.assertIn("one annotation every 0.5 seconds", str(exc_info.exception))
+
+    def test_annotation_image_size_is_limited(self):
+        with patched_backend_environment():
+            session = create_team("default-competition", "alice", "Alpha")
+            oversized_image = "data:image/png;base64," + (
+                "A" * (annotation_service.MAX_ANNOTATION_IMAGE_BASE64_LENGTH + 4)
+            )
+
+            with self.assertRaises(ValidationError) as exc_info:
+                submit_annotation(
+                    session_token=session.session_token,
+                    label=1,
+                    image_base64=oversized_image,
+                )
+            self.assertIn("too large", str(exc_info.exception))
+
+    def test_team_annotation_cap_blocks_additional_samples(self):
+        with patched_backend_environment(team_member_limit=2):
+            alice_session = create_team("default-competition", "alice", "Alpha")
+            bob_session = join_team("default-competition", "bob", alice_session.team.invite_code)
+
+            submit_annotation(
+                session_token=alice_session.session_token,
+                label=1,
+                image_base64=f"data:image/png;base64,{PNG_1X1_BASE64}",
+            )
+
+            original_limit = annotation_service.MAX_TEAM_ANNOTATIONS
+            annotation_service.MAX_TEAM_ANNOTATIONS = 1
+            try:
+                with self.assertRaises(ValidationError) as exc_info:
+                    submit_annotation(
+                        session_token=bob_session.session_token,
+                        label=2,
+                        image_base64=f"data:image/png;base64,{PNG_1X1_BASE64}",
+                    )
+            finally:
+                annotation_service.MAX_TEAM_ANNOTATIONS = original_limit
+
+            self.assertIn("at most 1 annotations", str(exc_info.exception))

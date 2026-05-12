@@ -33,7 +33,7 @@ function AnnotationPage({
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef(null);
   const historyRef = useRef([]);
-  const [selectedDigit, setSelectedDigit] = useState(0);
+  const [selectedDigit, setSelectedDigit] = useState(null);
   const [hasInk, setHasInk] = useState(false);
   const [statusMessage, setStatusMessage] = useState('手写数字、选定标签即可上传；团队标注自动互通，携手合力攻坚！');
   const [isSubmittingLabel, setIsSubmittingLabel] = useState(null);
@@ -153,6 +153,7 @@ function AnnotationPage({
     historyRef.current = [];
     lastPointRef.current = null;
     isDrawingRef.current = false;
+    setSelectedDigit(null);
     setHasInk(false);
     setStatusMessage('画布已清空，可以重新写数字。');
   };

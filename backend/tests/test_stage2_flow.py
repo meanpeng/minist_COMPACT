@@ -6,6 +6,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from backend.app.database import get_connection
 from backend.app.main import app
 from backend.app.services import submission_service
 from backend.tests.test_utils import patched_backend_environment
@@ -73,6 +74,12 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
                             json={"label": label, "image_base64": f"data:image/png;base64,{PNG_1X1_BASE64}"},
                         )
                         assert annotation_resp.status_code == 200, annotation_resp.text
+                        with get_connection() as connection:
+                            connection.execute(
+                                "UPDATE annotations SET created_at = ? WHERE user_id = ?",
+                                ("2026-01-01T00:00:00+00:00", alice_session["user"]["id"]),
+                            )
+                            connection.commit()
 
                     dashboard_before_training = client.get(
                         "/api/dashboard",

@@ -332,6 +332,7 @@ def init_db() -> None:
     settings.mnist_storage_path.mkdir(parents=True, exist_ok=True)
 
     with get_connection() as connection:
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.executescript(
             """
             PRAGMA foreign_keys = ON;
@@ -565,6 +566,7 @@ def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(settings.database_path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
     try:
         yield connection
     finally:

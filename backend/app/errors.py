@@ -27,3 +27,8 @@ class ValidationError(AppError):
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Authentication is required.") -> None:
         super().__init__(message, "UNAUTHORIZED", 401)
+
+
+class RateLimitError(AppError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, "RATE_LIMITED", 429)

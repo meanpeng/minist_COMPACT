@@ -103,7 +103,7 @@ function AppChrome({
 
           <div className="side-footer">
             <button type="button" className="experiment-button" onClick={onResetExperiment} disabled={isTrainingActive}>
-              {isTrainingActive ? 'LIVE LOCK' : '重新开始比赛'}
+              {isTrainingActive ? 'LIVE LOCK' : '退出比赛'}
             </button>
           </div>
         </aside>
