@@ -16,6 +16,7 @@ from ..schemas import (
     TrainingSamplePayload,
 )
 from .auth_service import get_authenticated_user
+from .event_log import append_competition_event
 from .modeling_service import get_model_config
 
 
@@ -234,4 +235,35 @@ def save_training_run(session_token: str, payload: TrainingRunPayload) -> Traini
             (user_id,),
         ).fetchone()
 
-    return _serialize_run(stored_row)
+    saved_run = _serialize_run(stored_row)
+    append_competition_event(
+        competition_id=competition_id,
+        event_type="training_saved",
+        user_id=user_id,
+        username=auth["username"],
+        team_id=team_id,
+        team_name=auth["team_name"],
+        details={
+            "params": {
+                "batch_size": payload.batch_size,
+                "epochs": payload.epochs,
+                "learning_rate": payload.learning_rate,
+                "trained_sample_count": payload.trained_sample_count,
+                "augmentation_modes": payload.augmentation_modes,
+                "augment_copies": payload.augment_copies,
+                "backend": payload.backend.strip().lower(),
+            },
+            "result": {
+                "final_loss": payload.final_loss,
+                "final_accuracy": payload.final_accuracy,
+                "final_val_loss": payload.final_val_loss,
+                "final_val_accuracy": payload.final_val_accuracy,
+            },
+            "logs": [
+                point.model_dump() if hasattr(point, "model_dump") else point.dict()
+                for point in payload.logs
+            ],
+        },
+        created_at=now,
+    )
+    return saved_run

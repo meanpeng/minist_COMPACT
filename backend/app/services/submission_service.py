@@ -24,6 +24,7 @@ from ..schemas import (
 )
 from .auth_service import get_authenticated_user
 from .competition_service import ensure_submissions_open, _normalize_test_dataset_source
+from .event_log import append_competition_event
 from .modeling_service import get_model_config
 from .training_service import _serialize_run
 
@@ -672,6 +673,26 @@ def evaluate_submission(
         )
         connection.commit()
 
+    append_competition_event(
+        competition_id=competition_id,
+        event_type="submission_evaluated",
+        user_id=user_id,
+        username=auth["username"],
+        team_id=team_id,
+        team_name=auth["team_name"],
+        details={
+            "result_id": result_id,
+            "submission_id": submission_id,
+            "accuracy": accuracy,
+            "correct_count": correct_count,
+            "sample_count": sample_count,
+            "param_count": param_count,
+            "rank": rank,
+            "remaining_team_attempts": remaining_team_attempts,
+            "test_dataset_source": dataset_source,
+        },
+        created_at=now,
+    )
     return SubmissionEvaluateResponse(
         competition=competition,
         accuracy=accuracy,

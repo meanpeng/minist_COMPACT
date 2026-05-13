@@ -15,6 +15,7 @@ MODULE_NAMES = [
     "backend.app.services.annotation_service",
     "backend.app.services.auth_service",
     "backend.app.services.competition_service",
+    "backend.app.services.event_log",
     "backend.app.services.submission_service",
     "backend.app.services.training_service",
 ]

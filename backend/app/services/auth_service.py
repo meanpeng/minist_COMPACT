@@ -11,6 +11,7 @@ from ..database import get_connection
 from ..errors import ConflictError, NotFoundError, UnauthorizedError, ValidationError
 from ..schemas import CompetitionPayload, CompetitionStatusPayload, SessionResponse, TeamPayload, UserPayload
 from .competition_service import get_competition_settings, list_running_competitions
+from .event_log import append_competition_event
 
 
 def _normalize_name(value: str, field_name: str) -> str:
@@ -232,6 +233,26 @@ def create_team(competition_id: str, username: str, team_name: str) -> SessionRe
         )
         session = _issue_session(connection, user_id)
         connection.commit()
+        append_competition_event(
+            competition_id=competition_id,
+            event_type="team_created",
+            user_id=user_id,
+            username=normalized_username,
+            team_id=team_id,
+            team_name=normalized_team_name,
+            details={"invite_code": invite_code},
+            created_at=created_at,
+        )
+        append_competition_event(
+            competition_id=competition_id,
+            event_type="user_created",
+            user_id=user_id,
+            username=normalized_username,
+            team_id=team_id,
+            team_name=normalized_team_name,
+            details={"source": "create_team"},
+            created_at=created_at,
+        )
         return session
 
 
@@ -279,6 +300,26 @@ def join_team(competition_id: str, username: str, invite_code: str) -> SessionRe
         )
         session = _issue_session(connection, user_id)
         connection.commit()
+        append_competition_event(
+            competition_id=competition_id,
+            event_type="user_created",
+            user_id=user_id,
+            username=normalized_username,
+            team_id=team["id"],
+            team_name=team["name"],
+            details={"source": "join_team"},
+            created_at=created_at,
+        )
+        append_competition_event(
+            competition_id=competition_id,
+            event_type="team_joined",
+            user_id=user_id,
+            username=normalized_username,
+            team_id=team["id"],
+            team_name=team["name"],
+            details={"invite_code": team["invite_code"]},
+            created_at=created_at,
+        )
         return session
 
 

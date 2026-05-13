@@ -9,6 +9,7 @@ from ..database import get_connection
 from ..errors import NotFoundError, ValidationError
 from ..schemas import ModelLayerPayload, ModelingConfigResponse, ModelSummaryPayload
 from .auth_service import get_authenticated_user
+from .event_log import append_competition_event
 
 INPUT_HEIGHT = 28
 INPUT_WIDTH = 28
@@ -314,6 +315,20 @@ def save_model_config(*, session_token: str, hidden_layers: List[ModelLayerPaylo
         )
         connection.commit()
 
+    summary_payload = summary.model_dump() if hasattr(summary, "model_dump") else summary.dict()
+    append_competition_event(
+        competition_id=competition_id,
+        event_type="model_saved",
+        user_id=user_id,
+        username=auth["username"],
+        team_id=team_id,
+        team_name=auth["team_name"],
+        details={
+            "hidden_layers": [_layer_to_dict(layer) for layer in normalized_layers],
+            "summary": summary_payload,
+        },
+        created_at=updated_at,
+    )
     return ModelingConfigResponse(
         user_id=user_id,
         team_id=team_id,

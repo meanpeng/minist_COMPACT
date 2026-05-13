@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -147,6 +148,24 @@ class Stage1ApiSmokeTests(unittest.TestCase):
                     blocked_data = blocked_bootstrap_resp.json()
                     assert blocked_data["submission_available"] is False
                     assert "submission limit" in blocked_data["submission_block_reason"].lower()
+
+                    log_path = settings.database_path.parent / "competition_logs" / "default-competition.log"
+                    assert log_path.exists()
+                    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+                    event_types = [event["event_type"] for event in events]
+                    assert event_types == [
+                        "team_created",
+                        "user_created",
+                        "user_created",
+                        "team_joined",
+                        "annotation_uploaded",
+                        "model_saved",
+                        "submission_evaluated",
+                    ]
+                    assert events[0]["team_name"] == "Alpha Squad"
+                    assert events[4]["details"]["label"] == 7
+                    assert events[5]["details"]["hidden_layers"][0]["type"] == "dense"
+                    assert events[6]["details"]["accuracy"] == 1.0
             finally:
                 submission_service.SUBMISSION_SAMPLE_COUNT = original_sample_count
                 submission_service._get_dataset = original_get_dataset

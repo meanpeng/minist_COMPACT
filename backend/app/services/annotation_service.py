@@ -17,6 +17,7 @@ from ..schemas import (
 )
 from .auth_service import get_authenticated_user
 from .competition_service import get_competition_settings
+from .event_log import append_competition_event
 
 ANNOTATION_SUBMIT_COOLDOWN = timedelta(seconds=0.5)
 MAX_ANNOTATION_IMAGE_BYTES = 16 * 1024
@@ -172,6 +173,22 @@ def submit_annotation(
                 absolute_path.unlink(missing_ok=True)
                 raise
 
+    stats = _build_stats(team_id, competition_id)
+    append_competition_event(
+        competition_id=competition_id,
+        event_type="annotation_uploaded",
+        user_id=user_id,
+        username=auth["username"],
+        team_id=team_id,
+        team_name=auth["team_name"],
+        details={
+            "annotation_id": sample_id,
+            "label": label,
+            "image_path": relative_path.as_posix(),
+            "team_annotation_count": stats.total_count,
+        },
+        created_at=created_at,
+    )
     return AnnotationSubmitResponse(
         status="ok",
         sample=AnnotationSamplePayload(
@@ -180,7 +197,7 @@ def submit_annotation(
             created_at=created_at,
             image_path=relative_path.as_posix(),
         ),
-        stats=_build_stats(team_id, competition_id),
+        stats=stats,
     )
 
 
