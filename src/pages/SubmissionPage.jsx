@@ -88,9 +88,9 @@ function SubmissionPage({
           setBootstrap(response);
           setResult(null);
           if (response.submission_available) {
-            setStatusMessage('挑战样本已就绪，随时可以开始本地推理。');
+            setStatusMessage('提交资格已确认，点击提交后再下载挑战样本。');
             setLogLines([
-              createLogLine(`Challenge ${response.submission_id.slice(0, 8)} 已生成，共 ${response.sample_count} 张 MNIST 样本。`),
+              createLogLine('提交面板轻量数据已载入，尚未下载测试样本。'),
               createLogLine('提交时只会上传预测标签，模型仍保留在本地。'),
             ]);
           } else {
@@ -147,7 +147,7 @@ function SubmissionPage({
   ];
 
   async function handleSubmit() {
-    if (!bootstrap || isSubmitting || !bootstrap.submission_available || !bootstrap.submission_id) {
+    if (!bootstrap || isSubmitting || !bootstrap.submission_available) {
       return;
     }
 
@@ -170,11 +170,32 @@ function SubmissionPage({
         throw new Error('当前浏览器里没有训练好的模型，请先完成至少一次训练。');
       }
 
-      setStatusMessage('正在对抽取的 MNIST 样本执行本地推理...');
+      setStatusMessage('正在下载挑战样本...');
       setLogLines((current) => [...current.slice(-5), createLogLine('模型权重已从本地浏览器存储载入。')]);
 
-      const flatPixels = decodeChallengeImages(bootstrap.challenge_images);
-      xs = tf.tensor4d(flatPixels, [bootstrap.sample_count, 28, 28, 1]);
+      const challengeBootstrap = bootstrap.submission_id && bootstrap.challenge_images?.length
+        ? bootstrap
+        : await fetchSubmissionBootstrap(session.session_token, { includeChallenge: true });
+
+      setBootstrap(challengeBootstrap);
+
+      if (!challengeBootstrap.submission_available || !challengeBootstrap.submission_id) {
+        setStatusMessage(challengeBootstrap.submission_block_reason || '当前暂时无法提交。');
+        setLogLines((current) => [
+          ...current.slice(-5),
+          createLogLine(challengeBootstrap.submission_block_reason || '当前暂时无法提交。'),
+        ]);
+        return;
+      }
+
+      setStatusMessage('正在对抽取的 MNIST 样本执行本地推理...');
+      setLogLines((current) => [
+        ...current.slice(-5),
+        createLogLine(`Challenge ${challengeBootstrap.submission_id.slice(0, 8)} 已生成，共 ${challengeBootstrap.sample_count} 张 MNIST 样本。`),
+      ]);
+
+      const flatPixels = decodeChallengeImages(challengeBootstrap.challenge_images);
+      xs = tf.tensor4d(flatPixels, [challengeBootstrap.sample_count, 28, 28, 1]);
       logits = model.predict(xs);
       predictionsTensor = logits.argMax(-1);
       const predictions = Array.from(await predictionsTensor.data());
@@ -186,7 +207,7 @@ function SubmissionPage({
       ]);
 
       const evaluation = await evaluateSubmission({
-        submission_id: bootstrap.submission_id,
+        submission_id: challengeBootstrap.submission_id,
         predictions,
         param_count: model.countParams(),
       }, session?.session_token);
@@ -299,7 +320,9 @@ function SubmissionPage({
                   <span>
                     {result
                       ? `本次成绩 ${toDisplayPercent(result.accuracy)}，共 ${result.sample_count} 个隐藏标签样本。`
-                      : `已加载 ${bootstrap?.sample_count || 0} 张随机 MNIST 样本，等待本地推理。`}
+                      : bootstrap?.sample_count
+                        ? `已加载 ${bootstrap.sample_count} 张随机 MNIST 样本，等待本地推理。`
+                        : '测试样本将在点击提交后下载。'}
                   </span>
                 </div>
               </div>

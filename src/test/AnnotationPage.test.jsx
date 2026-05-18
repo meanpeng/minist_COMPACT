@@ -40,13 +40,12 @@ describe('AnnotationPage label selection', () => {
     expect(view.container.querySelector('.digit-button-active')).toBeNull();
   });
 
-  it('highlights only the digit chosen for the current empty canvas', () => {
+  it('asks the student to write before choosing a label on an empty canvas', () => {
     const view = render(<AnnotationPage session={session} />);
 
     fireEvent.click(view.getByRole('button', { name: '4' }));
 
-    const activeDigit = view.container.querySelector('.digit-button-active');
-    expect(activeDigit).toHaveTextContent('4');
-    expect(view.getByText('已选择标签 4，先写数字再上传。')).toBeInTheDocument();
+    expect(view.container.querySelector('.digit-button-active')).toBeNull();
+    expect(view.getByText('请先在画布上写数字，再选择标签上传。')).toBeInTheDocument();
   });
 });

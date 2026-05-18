@@ -212,6 +212,8 @@ npm run test:stage3:soak
 
 这些目录都可以通过环境变量改写。
 
+Docker Compose 会同时启动一个 Redis 容器，并通过 `REDIS_URL=redis://redis:6379/0` 启用短期热点缓存。非 Docker 本地运行时如果不设置 `REDIS_URL`，后端会自动使用进程内缓存。
+
 ## 管理员说明
 
 管理员接口使用 `X-Admin-Token` 请求头鉴权。

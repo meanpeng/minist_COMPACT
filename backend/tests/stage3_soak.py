@@ -26,16 +26,55 @@ PNG_1X1_BASE64 = (
 class SoakMetrics:
     counts: Counter
     failures: list[str]
+    latencies_ms: dict[str, list[float]]
 
     def __init__(self) -> None:
         self.counts = Counter()
         self.failures = []
+        self.latencies_ms = {}
 
-    def record(self, operation: str, status_code: int) -> None:
+    def record(self, operation: str, status_code: int, elapsed_ms: float) -> None:
         self.counts[f"{operation}:{status_code}"] += 1
+        self.latencies_ms.setdefault(operation, []).append(elapsed_ms)
 
     def fail(self, operation: str, detail: str) -> None:
         self.failures.append(f"{operation}: {detail}")
+
+
+async def _request(
+    client: httpx.AsyncClient,
+    metrics: SoakMetrics,
+    operation: str,
+    method: str,
+    path: str,
+    **kwargs,
+) -> httpx.Response:
+    started_at = time.perf_counter()
+    response = await client.request(method, path, **kwargs)
+    metrics.record(operation, response.status_code, (time.perf_counter() - started_at) * 1000)
+    return response
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+
+    ordered = sorted(values)
+    index = min(round((len(ordered) - 1) * percentile), len(ordered) - 1)
+    return ordered[index]
+
+
+def _latency_summary(latencies_ms: dict[str, list[float]]) -> dict[str, dict[str, float | int]]:
+    summary = {}
+    for operation, values in sorted(latencies_ms.items()):
+        summary[operation] = {
+            "count": len(values),
+            "p50_ms": round(_percentile(values, 0.50), 2),
+            "p95_ms": round(_percentile(values, 0.95), 2),
+            "p99_ms": round(_percentile(values, 0.99), 2),
+            "max_ms": round(max(values), 2),
+        }
+    return summary
 
 
 async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: SoakMetrics) -> list[str]:
@@ -43,7 +82,11 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
     tokens: list[str] = []
 
     for team_index in range(team_count):
-        create_response = await client.post(
+        create_response = await _request(
+            client,
+            metrics,
+            "create-team",
+            "POST",
             "/api/auth/create-team",
             json={
                 "competition_id": "default-competition",
@@ -51,7 +94,6 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
                 "team_name": f"Soak Team {team_index}",
             },
         )
-        metrics.record("create-team", create_response.status_code)
         if create_response.status_code != 200:
             metrics.fail("create-team", create_response.text)
             continue
@@ -61,7 +103,11 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
         leader_token = create_payload["session_token"]
         tokens.append(leader_token)
 
-        annotation_response = await client.post(
+        annotation_response = await _request(
+            client,
+            metrics,
+            "seed-annotation",
+            "POST",
             "/api/annotation/submit",
             headers={"Authorization": f"Bearer {leader_token}"},
             json={
@@ -69,12 +115,15 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
                 "image_base64": f"data:image/png;base64,{PNG_1X1_BASE64}",
             },
         )
-        metrics.record("seed-annotation", annotation_response.status_code)
         if annotation_response.status_code != 200:
             metrics.fail("seed-annotation", annotation_response.text)
             continue
 
-        model_response = await client.put(
+        model_response = await _request(
+            client,
+            metrics,
+            "seed-model",
+            "PUT",
             "/api/modeling/config",
             headers={"Authorization": f"Bearer {leader_token}"},
             json={
@@ -88,12 +137,15 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
                 ]
             },
         )
-        metrics.record("seed-model", model_response.status_code)
         if model_response.status_code != 200:
             metrics.fail("seed-model", model_response.text)
             continue
 
-        training_response = await client.put(
+        training_response = await _request(
+            client,
+            metrics,
+            "seed-training",
+            "PUT",
             "/api/training/run",
             headers={"Authorization": f"Bearer {leader_token}"},
             json={
@@ -126,12 +178,15 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
                 ],
             },
         )
-        metrics.record("seed-training", training_response.status_code)
         if training_response.status_code != 200:
             metrics.fail("seed-training", training_response.text)
             continue
 
-        join_response = await client.post(
+        join_response = await _request(
+            client,
+            metrics,
+            "join-team",
+            "POST",
             "/api/auth/join-team",
             json={
                 "competition_id": "default-competition",
@@ -139,7 +194,6 @@ async def _create_users(client: httpx.AsyncClient, user_count: int, metrics: Soa
                 "invite_code": invite_code,
             },
         )
-        metrics.record("join-team", join_response.status_code)
         if join_response.status_code == 200:
             tokens.append(join_response.json()["session_token"])
         else:
@@ -155,11 +209,14 @@ async def _dashboard_loop(
     stop_at: float,
 ) -> None:
     while time.monotonic() < stop_at:
-        response = await client.get(
+        response = await _request(
+            client,
+            metrics,
+            "dashboard",
+            "GET",
             "/api/dashboard",
             headers={"Authorization": f"Bearer {token}"},
         )
-        metrics.record("dashboard", response.status_code)
         if response.status_code != 200:
             metrics.fail("dashboard", response.text)
         await asyncio.sleep(1)
@@ -173,7 +230,11 @@ async def _annotation_loop(
     stop_at: float,
 ) -> None:
     while time.monotonic() < stop_at:
-        response = await client.post(
+        response = await _request(
+            client,
+            metrics,
+            "annotation",
+            "POST",
             "/api/annotation/submit",
             headers={"Authorization": f"Bearer {token}"},
             json={
@@ -181,8 +242,7 @@ async def _annotation_loop(
                 "image_base64": f"data:image/png;base64,{PNG_1X1_BASE64}",
             },
         )
-        metrics.record("annotation", response.status_code)
-        if response.status_code != 200:
+        if response.status_code not in {200, 429}:
             metrics.fail("annotation", response.text)
         await asyncio.sleep(2)
 
@@ -195,11 +255,14 @@ async def _submission_loop(
     stop_at: float,
 ) -> None:
     while time.monotonic() < stop_at:
-        bootstrap_response = await client.get(
-            "/api/submission/bootstrap",
+        bootstrap_response = await _request(
+            client,
+            metrics,
+            "submission-bootstrap",
+            "GET",
+            "/api/submission/bootstrap?include_challenge=true",
             headers={"Authorization": f"Bearer {token}"},
         )
-        metrics.record("submission-bootstrap", bootstrap_response.status_code)
         if bootstrap_response.status_code != 200:
             metrics.fail("submission-bootstrap", bootstrap_response.text)
             await asyncio.sleep(3)
@@ -215,7 +278,11 @@ async def _submission_loop(
             pixels = base64.b64decode(image["pixels_b64"])
             predictions.append(labels_by_index[pixels[0]])
 
-        evaluate_response = await client.post(
+        evaluate_response = await _request(
+            client,
+            metrics,
+            "submission-evaluate",
+            "POST",
             "/api/submission/evaluate",
             headers={"Authorization": f"Bearer {token}"},
             json={
@@ -224,7 +291,6 @@ async def _submission_loop(
                 "param_count": 2048,
             },
         )
-        metrics.record("submission-evaluate", evaluate_response.status_code)
         if evaluate_response.status_code != 200:
             metrics.fail("submission-evaluate", evaluate_response.text)
         await asyncio.sleep(3)
@@ -296,6 +362,7 @@ def main() -> int:
         "users": args.users,
         "elapsed_seconds": elapsed,
         "metrics": dict(sorted(metrics.counts.items())),
+        "latency_ms": _latency_summary(metrics.latencies_ms),
         "failure_count": failure_count,
         "five_xx_count": five_xx_count,
         "sample_failures": metrics.failures[:10],

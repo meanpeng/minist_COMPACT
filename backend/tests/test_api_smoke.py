@@ -119,6 +119,17 @@ class Stage1ApiSmokeTests(unittest.TestCase):
                     assert submission_bootstrap_resp.status_code == 200, submission_bootstrap_resp.text
                     submission_bootstrap_data = submission_bootstrap_resp.json()
                     assert submission_bootstrap_data["submission_available"] is True
+                    assert submission_bootstrap_data["submission_id"] is None
+                    assert submission_bootstrap_data["sample_count"] == 0
+                    assert submission_bootstrap_data["challenge_images"] == []
+
+                    submission_bootstrap_resp = client.get(
+                        "/api/submission/bootstrap?include_challenge=true",
+                        headers={"Authorization": f"Bearer {token1}"},
+                    )
+                    assert submission_bootstrap_resp.status_code == 200, submission_bootstrap_resp.text
+                    submission_bootstrap_data = submission_bootstrap_resp.json()
+                    assert submission_bootstrap_data["submission_available"] is True
                     assert submission_bootstrap_data["sample_count"] == 5
 
                     sample_indexes = [item["index"] for item in submission_bootstrap_data["challenge_images"]]
@@ -204,7 +215,7 @@ class Stage1ApiSmokeTests(unittest.TestCase):
                 token = create_resp.json()["session_token"]
 
                 submission_resp = client.get(
-                    "/api/submission/bootstrap",
+                    "/api/submission/bootstrap?include_challenge=true",
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 assert submission_resp.status_code == 200, submission_resp.text

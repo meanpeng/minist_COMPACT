@@ -74,6 +74,7 @@ function DashboardPage({
   inviteCodeNotice = null,
   onDismissInviteCodeNotice,
   onCompetitionChange,
+  onAnnotationStatsChange,
   competitionTimer,
 }) {
   const [dashboard, setDashboard] = useState(null);
@@ -83,9 +84,14 @@ function DashboardPage({
 
   useEffect(() => {
     let isActive = true;
-    let intervalId = null;
+    let timeoutId = null;
+    let isRequestRunning = false;
 
     async function loadDashboard({ silent } = { silent: false }) {
+      if ((silent && document.visibilityState === 'hidden') || isRequestRunning) {
+        return;
+      }
+
       if (!session?.session_token) {
         if (isActive) {
           setDashboard(null);
@@ -98,6 +104,7 @@ function DashboardPage({
         setIsLoading(true);
       }
 
+      isRequestRunning = true;
       try {
         const response = await fetchDashboard(session.session_token);
         if (!isActive) {
@@ -107,6 +114,9 @@ function DashboardPage({
         setDashboard(response);
         setErrorMessage('');
         onCompetitionChange?.(response.competition || null);
+        if (response.annotation_stats) {
+          onAnnotationStatsChange?.(response.annotation_stats);
+        }
       } catch (error) {
         if (!isActive) {
           return;
@@ -114,6 +124,7 @@ function DashboardPage({
 
         setErrorMessage(error instanceof ApiError ? error.message : '总览数据加载失败。');
       } finally {
+        isRequestRunning = false;
         if (isActive && !silent) {
           setIsLoading(false);
         }
@@ -122,13 +133,19 @@ function DashboardPage({
 
     loadDashboard();
 
-    intervalId = window.setInterval(() => {
-      loadDashboard({ silent: true });
-    }, REFRESH_INTERVAL_MS);
+    const scheduleNextRefresh = () => {
+      timeoutId = window.setTimeout(async () => {
+        await loadDashboard({ silent: true });
+        if (isActive) {
+          scheduleNextRefresh();
+        }
+      }, REFRESH_INTERVAL_MS);
+    };
+    scheduleNextRefresh();
 
     return () => {
       isActive = false;
-      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
     };
   }, [session?.session_token]);
 

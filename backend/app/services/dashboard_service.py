@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from time import monotonic
+from threading import Lock
 from typing import Dict, List, Optional
 
+from ..config import settings
 from ..database import get_connection
 from ..errors import NotFoundError
 from ..schemas import (
@@ -17,6 +21,88 @@ from ..schemas import (
 )
 from .auth_service import get_authenticated_user
 from .competition_service import get_competition_settings
+
+DASHBOARD_RANKING_CACHE_TTL_SECONDS = 1.5
+_RANKING_CACHE_LOCK = Lock()
+_RANKING_CACHE: dict[tuple[str, str, str], tuple[float, dict]] = {}
+_REDIS_CLIENT = None
+_REDIS_UNAVAILABLE = False
+
+
+def _get_redis_client():
+    global _REDIS_CLIENT, _REDIS_UNAVAILABLE
+    if not settings.redis_url or _REDIS_UNAVAILABLE:
+        return None
+    if _REDIS_CLIENT is not None:
+        return _REDIS_CLIENT
+
+    try:
+        import redis
+
+        _REDIS_CLIENT = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        _REDIS_CLIENT.ping()
+    except Exception:
+        _REDIS_UNAVAILABLE = True
+        _REDIS_CLIENT = None
+    return _REDIS_CLIENT
+
+
+def _redis_cache_prefix() -> str:
+    return "mnist-compact:dashboard-ranking"
+
+
+def _redis_cache_key(database_file: str, competition_id: str, team_id: str) -> str:
+    return f"{_redis_cache_prefix()}:{database_file}:{competition_id}:{team_id}"
+
+
+def _serialize_payload(payload) -> dict:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    return payload.dict()
+
+
+def _serialize_ranking_data(ranking_data: dict) -> str:
+    payload = {
+        "ranked_team_count": ranking_data["ranked_team_count"],
+        "current_rank": ranking_data["current_rank"],
+        "leaderboard": [_serialize_payload(entry) for entry in ranking_data["leaderboard"]],
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _deserialize_ranking_data(raw_value: str) -> dict:
+    payload = json.loads(raw_value)
+    return {
+        "ranked_team_count": payload["ranked_team_count"],
+        "current_rank": payload["current_rank"],
+        "leaderboard": [
+            DashboardLeaderboardEntryPayload(**entry)
+            for entry in payload.get("leaderboard", [])
+        ],
+    }
+
+
+def invalidate_ranking_cache(competition_id: Optional[str] = None) -> None:
+    with _RANKING_CACHE_LOCK:
+        if competition_id is None:
+            _RANKING_CACHE.clear()
+        else:
+            stale_keys = [key for key in _RANKING_CACHE if key[1] == competition_id]
+            for key in stale_keys:
+                del _RANKING_CACHE[key]
+
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return
+
+    pattern = f"{_redis_cache_prefix()}:*"
+    if competition_id:
+        pattern = f"{_redis_cache_prefix()}:*:{competition_id}:*"
+    try:
+        for key in redis_client.scan_iter(match=pattern, count=100):
+            redis_client.delete(key)
+    except Exception:
+        pass
 
 
 def _serialize_session(row, session_token: str, expires_at: str) -> SessionResponse:
@@ -219,6 +305,60 @@ def _fetch_current_rank(connection, competition_id: str, team_id: str) -> Option
     return row["overall_rank"] if row else None
 
 
+def _cache_namespace(connection) -> str:
+    row = connection.execute("PRAGMA database_list").fetchone()
+    return row["file"] if row and "file" in row.keys() else "memory"
+
+
+def _get_cached_ranking_data(connection, competition_id: str, team_id: str) -> dict:
+    database_file = _cache_namespace(connection)
+    cache_key = (database_file, competition_id, team_id)
+    now = monotonic()
+    with _RANKING_CACHE_LOCK:
+        cached = _RANKING_CACHE.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+
+    redis_client = _get_redis_client()
+    redis_key = _redis_cache_key(database_file, competition_id, team_id)
+    if redis_client:
+        try:
+            cached_value = redis_client.get(redis_key)
+            if cached_value:
+                ranking_data = _deserialize_ranking_data(cached_value)
+                with _RANKING_CACHE_LOCK:
+                    _RANKING_CACHE[cache_key] = (now + DASHBOARD_RANKING_CACHE_TTL_SECONDS, ranking_data)
+                return ranking_data
+        except Exception:
+            pass
+
+    ranked_team_count = connection.execute(
+        """
+        SELECT COUNT(DISTINCT team_id) AS total_ranked_teams
+        FROM submission_results
+        WHERE competition_id = ?
+        """,
+        (competition_id,),
+    ).fetchone()["total_ranked_teams"]
+
+    member_map = _fetch_member_map(connection, competition_id)
+    leaderboard = _fetch_leaderboard(connection, competition_id, team_id, member_map)
+    current_rank = _fetch_current_rank(connection, competition_id, team_id)
+    ranking_data = {
+        "ranked_team_count": ranked_team_count,
+        "leaderboard": leaderboard,
+        "current_rank": current_rank,
+    }
+    with _RANKING_CACHE_LOCK:
+        _RANKING_CACHE[cache_key] = (now + DASHBOARD_RANKING_CACHE_TTL_SECONDS, ranking_data)
+    if redis_client:
+        try:
+            redis_client.setex(redis_key, int(DASHBOARD_RANKING_CACHE_TTL_SECONDS) + 1, _serialize_ranking_data(ranking_data))
+        except Exception:
+            pass
+    return ranking_data
+
+
 def get_dashboard(session_token: str, annotation_goal: int) -> DashboardResponse:
     auth = get_authenticated_user(session_token)
     competition = get_competition_settings(auth["competition_id"])
@@ -275,18 +415,10 @@ def get_dashboard(session_token: str, annotation_goal: int) -> DashboardResponse
             latest_result_row["created_at"] if latest_result_row else None,
         )
 
-        ranked_team_count = connection.execute(
-            """
-            SELECT COUNT(DISTINCT team_id) AS total_ranked_teams
-            FROM submission_results
-            WHERE competition_id = ?
-            """,
-            (auth["competition_id"],),
-        ).fetchone()["total_ranked_teams"]
-
-        member_map = _fetch_member_map(connection, auth["competition_id"])
-        leaderboard = _fetch_leaderboard(connection, auth["competition_id"], session.team.id, member_map)
-        current_rank = _fetch_current_rank(connection, auth["competition_id"], session.team.id)
+        ranking_data = _get_cached_ranking_data(connection, auth["competition_id"], session.team.id)
+        ranked_team_count = ranking_data["ranked_team_count"]
+        leaderboard = ranking_data["leaderboard"]
+        current_rank = ranking_data["current_rank"]
         percentile = None
         if current_rank is not None and ranked_team_count:
             percentile = current_rank / ranked_team_count

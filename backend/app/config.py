@@ -24,6 +24,7 @@ class Settings:
     submission_cooldown_minutes: int
     submission_team_max_attempts: int
     default_test_dataset_source: str
+    redis_url: str | None
 
 
 def _load_test_dataset_source(value: str | None) -> str:
@@ -71,6 +72,7 @@ def load_settings() -> Settings:
         submission_cooldown_minutes=int(os.getenv("SUBMISSION_COOLDOWN_MINUTES", "5")),
         submission_team_max_attempts=int(os.getenv("SUBMISSION_TEAM_MAX_ATTEMPTS", "10")),
         default_test_dataset_source=_load_test_dataset_source(os.getenv("DEFAULT_TEST_DATASET_SOURCE")),
+        redis_url=os.getenv("REDIS_URL") or None,
     )
 
 

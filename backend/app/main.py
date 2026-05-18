@@ -186,8 +186,14 @@ def save_training_run_route(
 
 
 @app.get("/api/submission/bootstrap", response_model=SubmissionBootstrapResponse)
-def get_submission_bootstrap_route(authorization: Optional[str] = Header(default=None)) -> SubmissionBootstrapResponse:
-    return create_submission_bootstrap(_extract_bearer_token(authorization))
+def get_submission_bootstrap_route(
+    include_challenge: bool = False,
+    authorization: Optional[str] = Header(default=None),
+) -> SubmissionBootstrapResponse:
+    return create_submission_bootstrap(
+        _extract_bearer_token(authorization),
+        include_challenge=include_challenge,
+    )
 
 
 @app.post("/api/submission/evaluate", response_model=SubmissionEvaluateResponse)

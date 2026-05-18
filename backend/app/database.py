@@ -538,17 +538,29 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_annotations_team_label
             ON annotations(team_id, label);
 
+            CREATE INDEX IF NOT EXISTS idx_annotations_user_competition_created_at
+            ON annotations(user_id, competition_id, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_annotations_team_competition
+            ON annotations(team_id, competition_id);
+
             CREATE INDEX IF NOT EXISTS idx_submission_challenges_user_id
             ON submission_challenges(user_id);
 
             CREATE INDEX IF NOT EXISTS idx_submission_challenges_competition_id
             ON submission_challenges(competition_id);
 
+            CREATE INDEX IF NOT EXISTS idx_submission_challenges_active_user_team
+            ON submission_challenges(competition_id, user_id, team_id, used_at, expires_at);
+
             CREATE INDEX IF NOT EXISTS idx_submission_results_team_accuracy
             ON submission_results(team_id, accuracy DESC, param_count ASC, created_at ASC);
 
             CREATE INDEX IF NOT EXISTS idx_submission_results_competition_accuracy
             ON submission_results(competition_id, accuracy DESC, param_count ASC, created_at ASC);
+
+            CREATE INDEX IF NOT EXISTS idx_submission_results_competition_team_created_at
+            ON submission_results(competition_id, team_id, created_at DESC);
 
             CREATE INDEX IF NOT EXISTS idx_submission_results_user_created_at
             ON submission_results(user_id, created_at DESC);
@@ -567,6 +579,7 @@ def get_connection() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute("PRAGMA synchronous = NORMAL")
     try:
         yield connection
     finally:

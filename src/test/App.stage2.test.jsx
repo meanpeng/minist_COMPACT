@@ -97,7 +97,7 @@ describe('Stage 2 app flow', () => {
     fetchAnnotationStatsMock.mockReset();
   });
 
-  it('restores session from storage and keeps polling session plus annotation stats', async () => {
+  it('restores dashboard session and avoids duplicate annotation stats polling', async () => {
     saveBootstrapState({
       stats: {
         team_id: 'team-1',
@@ -131,10 +131,10 @@ describe('Stage 2 app flow', () => {
     await screen.findByText('dashboard-page');
     await waitFor(() => {
       expect(fetchSessionMock).toHaveBeenCalledTimes(1);
-      expect(fetchAnnotationStatsMock).toHaveBeenCalledTimes(1);
     });
+    expect(fetchAnnotationStatsMock).not.toHaveBeenCalled();
 
-    expect(intervalCallbacks.length).toBeGreaterThanOrEqual(2);
+    expect(intervalCallbacks.length).toBeGreaterThanOrEqual(1);
 
     for (const callback of intervalCallbacks) {
       await callback();
@@ -142,8 +142,8 @@ describe('Stage 2 app flow', () => {
 
     await waitFor(() => {
       expect(fetchSessionMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-      expect(fetchAnnotationStatsMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+    expect(fetchAnnotationStatsMock).not.toHaveBeenCalled();
 
     setIntervalSpy.mockRestore();
   });

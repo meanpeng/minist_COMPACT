@@ -132,8 +132,9 @@ export function saveTrainingRun(payload, sessionToken) {
   });
 }
 
-export function fetchSubmissionBootstrap(sessionToken) {
-  return request('/api/submission/bootstrap', { sessionToken });
+export function fetchSubmissionBootstrap(sessionToken, { includeChallenge = false } = {}) {
+  const query = includeChallenge ? '?include_challenge=true' : '';
+  return request(`/api/submission/bootstrap${query}`, { sessionToken });
 }
 
 export function evaluateSubmission(payload, sessionToken) {

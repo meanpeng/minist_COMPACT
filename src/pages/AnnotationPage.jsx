@@ -368,15 +368,16 @@ function AnnotationPage({
   };
 
   async function handleLabelSelection(digit) {
+    if (!hasInk) {
+      setSelectedDigit(null);
+      setStatusMessage('请先在画布上写数字，再选择标签上传。');
+      return;
+    }
+
     setSelectedDigit(digit);
 
     if (!sessionToken || !teamId) {
       setStatusMessage('请先创建或加入队伍，再开始标注。');
-      return;
-    }
-
-    if (!hasInk) {
-      setStatusMessage(`已选择标签 ${digit}，先写数字再上传。`);
       return;
     }
 

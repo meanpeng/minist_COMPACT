@@ -222,7 +222,7 @@ class Stage3ConcurrencyAndStabilityTests(unittest.TestCase):
 
                 async def bootstrap_and_submit(token: str) -> tuple[int, int]:
                     bootstrap_response = await client.get(
-                        "/api/submission/bootstrap",
+                        "/api/submission/bootstrap?include_challenge=true",
                         headers={"Authorization": f"Bearer {token}"},
                     )
                     if bootstrap_response.status_code != 200:

@@ -15,6 +15,7 @@ MODULE_NAMES = [
     "backend.app.services.annotation_service",
     "backend.app.services.auth_service",
     "backend.app.services.competition_service",
+    "backend.app.services.dashboard_service",
     "backend.app.services.event_log",
     "backend.app.services.submission_service",
     "backend.app.services.training_service",
@@ -39,6 +40,7 @@ def make_test_settings(root: Path, **overrides) -> SimpleNamespace:
         "submission_cooldown_minutes": 0,
         "submission_team_max_attempts": 1,
         "default_test_dataset_source": "local_test",
+        "redis_url": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

@@ -160,7 +160,7 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
                     assert training_run_resp.json()["final_accuracy"] == 0.97
 
                     submission_bootstrap_alpha = client.get(
-                        "/api/submission/bootstrap",
+                        "/api/submission/bootstrap?include_challenge=true",
                         headers={"Authorization": f"Bearer {alice_token}"},
                     )
                     assert submission_bootstrap_alpha.status_code == 200, submission_bootstrap_alpha.text
@@ -205,7 +205,7 @@ class Stage2MainFlowIntegrationTests(unittest.TestCase):
                     )
 
                     submission_bootstrap_beta = client.get(
-                        "/api/submission/bootstrap",
+                        "/api/submission/bootstrap?include_challenge=true",
                         headers={"Authorization": f"Bearer {beta_token}"},
                     )
                     assert submission_bootstrap_beta.status_code == 200, submission_bootstrap_beta.text

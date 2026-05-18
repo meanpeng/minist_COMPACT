@@ -21,7 +21,8 @@ import {
 
 const DEFAULT_ROUTE = 'begin';
 const VALID_ROUTES = new Set(['begin', 'dashboard', 'annotation', 'modeling', 'training', 'submission', 'adminneo', 'admin-v2']);
-const SESSION_REFRESH_INTERVAL_MS = 5000;
+const SESSION_REFRESH_INTERVAL_MS = 30000;
+const ANNOTATION_STATS_REFRESH_INTERVAL_MS = 10000;
 
 function areAnnotationStatsEqual(currentStats, nextStats) {
   if (!currentStats || !nextStats) {
@@ -59,6 +60,17 @@ function App() {
   const [inviteCodeNotice, setInviteCodeNotice] = useState(null);
   const [isTrainingActive, setIsTrainingActive] = useState(false);
   const competitionTimer = useCompetitionTimer(session?.competition_status || null);
+
+  const commitAnnotationStats = (nextStats) => {
+    setAnnotationStats((currentStats) => {
+      if (areAnnotationStatsEqual(currentStats, nextStats)) {
+        return currentStats;
+      }
+
+      saveStoredAnnotationStats(nextStats);
+      return nextStats;
+    });
+  };
 
   useEffect(() => {
     const tokenFromUrl = getAdminTokenFromSearch();
@@ -152,7 +164,9 @@ function App() {
     };
 
     const intervalId = window.setInterval(() => {
-      refreshSession();
+      if (document.visibilityState !== 'hidden') {
+        refreshSession();
+      }
     }, SESSION_REFRESH_INTERVAL_MS);
 
     return () => {
@@ -169,9 +183,20 @@ function App() {
       return undefined;
     }
 
+    if (route === 'dashboard') {
+      return undefined;
+    }
+
     let isActive = true;
+    let timeoutId = null;
+    let isRequestRunning = false;
 
     const loadAnnotationStats = async ({ silent } = { silent: false }) => {
+      if (document.visibilityState === 'hidden' || isRequestRunning) {
+        return;
+      }
+
+      isRequestRunning = true;
       if (!silent) {
         setIsAnnotationStatsLoading(true);
       }
@@ -179,19 +204,13 @@ function App() {
       try {
         const nextStats = await fetchAnnotationStats(session.session_token);
         if (isActive) {
-          setAnnotationStats((currentStats) => {
-            if (areAnnotationStatsEqual(currentStats, nextStats)) {
-              return currentStats;
-            }
-
-            saveStoredAnnotationStats(nextStats);
-            return nextStats;
-          });
+          commitAnnotationStats(nextStats);
         }
       } catch {
         // Keep the last successful stats so training unlock state does not flicker
         // across route changes or transient backend delays.
       } finally {
+        isRequestRunning = false;
         if (isActive && !silent) {
           setIsAnnotationStatsLoading(false);
         }
@@ -199,15 +218,21 @@ function App() {
     };
 
     loadAnnotationStats();
-    const intervalId = window.setInterval(() => {
-      loadAnnotationStats({ silent: true });
-    }, 5000);
+    const scheduleNextRefresh = () => {
+      timeoutId = window.setTimeout(async () => {
+        await loadAnnotationStats({ silent: true });
+        if (isActive) {
+          scheduleNextRefresh();
+        }
+      }, ANNOTATION_STATS_REFRESH_INTERVAL_MS);
+    };
+    scheduleNextRefresh();
 
     return () => {
       isActive = false;
-      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
     };
-  }, [session?.session_token]);
+  }, [route, session?.session_token]);
 
   useEffect(() => {
     if (!isBootstrapping && !session && route !== 'begin' && route !== 'adminneo' && route !== 'admin-v2') {
@@ -281,16 +306,7 @@ function App() {
         competitionTimer={competitionTimer}
         stats={annotationStats}
         isStatsLoading={isAnnotationStatsLoading}
-        onAnnotationStatsChange={(nextStats) => {
-          setAnnotationStats((currentStats) => {
-            if (areAnnotationStatsEqual(currentStats, nextStats)) {
-              return currentStats;
-            }
-
-            saveStoredAnnotationStats(nextStats);
-            return nextStats;
-          });
-        }}
+        onAnnotationStatsChange={commitAnnotationStats}
       />
     );
   }
@@ -360,6 +376,7 @@ function App() {
           return nextSession;
         });
       }}
+      onAnnotationStatsChange={commitAnnotationStats}
     />
   );
 }

@@ -24,6 +24,7 @@ from ..schemas import (
 )
 from .auth_service import get_authenticated_user
 from .competition_service import ensure_submissions_open, _normalize_test_dataset_source
+from .dashboard_service import invalidate_ranking_cache
 from .event_log import append_competition_event
 from .modeling_service import get_model_config
 from .training_service import _serialize_run
@@ -423,7 +424,7 @@ def _get_submission_limit_error(
     return None
 
 
-def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapResponse:
+def create_submission_bootstrap(session_token: str, *, include_challenge: bool = False) -> SubmissionBootstrapResponse:
     model_config = get_model_config(session_token)
     _ensure_team_membership(model_config.user_id, model_config.team_id)
     competition = ensure_submissions_open(model_config.competition_id)
@@ -443,7 +444,7 @@ def create_submission_bootstrap(session_token: str) -> SubmissionBootstrapRespon
             submission_cooldown_minutes=competition.submission_cooldown_minutes,
             submission_limit=competition.submission_limit,
         )
-        if not submission_block_reason:
+        if include_challenge and not submission_block_reason:
             dataset = _get_dataset(competition.test_dataset_source)
             challenge_sample_count = min(SUBMISSION_SAMPLE_COUNT, len(dataset.labels))
             if challenge_sample_count <= 0:
@@ -673,6 +674,7 @@ def evaluate_submission(
         )
         connection.commit()
 
+    invalidate_ranking_cache(competition_id)
     append_competition_event(
         competition_id=competition_id,
         event_type="submission_evaluated",
